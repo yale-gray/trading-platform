@@ -158,6 +158,47 @@ Tasks within a wave can run in parallel when their file lists don't overlap.
 | 004 | Money columns become TEXT Decimal (D7). Transactions are per portfolio per bar, with an `export_state` checkpoint (D8). Kill-switch ack does not reset; reset is CLI only. Add a unified CLI, and one Wave-1 deps task covering every spec's dependencies (D11). |
 | 005 | Fixtures become synthetic parquet in the cache layout, 2018–2024 (D9). Re-check §6 hand-worked numbers against SPEC-003's rounding table. CI is Ubuntu only. Mutation testing is deferred. |
 
+## 5. Addendum: decisions from the amendment round (2026-10-20)
+
+**A1. TargetBook is persisted.**
+- **Why:** the book is state. A runner that restarted without it would submit empty weights on the next rebalance bar and liquidate the sleeves.
+- **What to persist:** `TargetBook.state()` is stored inside the same per-bar `engine_checkpoint` row (a `target_book_json` column), and is passed back to `BarDriver(..., book=restored)`.
+- **Who:** 004 adds the column; 002 defines `state()` and `from_state()`.
+
+**A2. Registries.**
+- `tradebot.strategy.indicators.INDICATORS: dict[str, Callable]` maps every public indicator name to its function. It is part of 002 T2 (Wave 1).
+- `tradebot.strategy.schema.STRATEGIES` maps strategy ids to the built-in specs. It is part of 002 T1 (Wave 2).
+- SPEC-005's lookahead-completeness meta-test iterates both.
+
+**A3. Duplicate-order protection.**
+- This comes from three things together:
+  - the unique `run_log(portfolio_id, bar_ts)` row
+  - the single transaction per portfolio per bar
+  - SPEC-003's deterministic order ids (`O{n:08d}`), restored from the checkpoint
+- There is no separate idempotency key. SPEC-005's key-based test becomes "re-running a committed bar raises or no-ops, and the ledger is unchanged".
+
+**A4. Runner and restart tests** live in `tests/platform/` with the `restart` marker, following SPEC-004. Fault points are `after_driver`, `before_commit` and `after_commit`.
+
+**A5. Small calls.**
+- Volume stays unadjusted for splits in v1, since no v1 strategy reads volume.
+- A kill-switch trip drops any pending `RebalancePlan` (SPEC-003).
+- `exit_reason` gains `manual`.
+- SPEC-002 restricts stops to ATR(14), one per strategy.
+- `.gitignore` is owned by platform-lead. SPEC-005 T2 may append `.hypothesis/` once.
+
+**A6. Wave 1 dispatch order.**
+1. 004 T1 (deps, lock, CI). Everything else needs the packages.
+2. In parallel:
+   - 005 T1 clock
+   - 005 T2 conftest and guards
+   - 005 T3 fixtures
+   - 001 T1 types and interfaces
+   - 001 T3 calendar
+   - 003 T1 money
+   - 002 T2 indicators
+3. In parallel: 003 T11a money tests, 002 T7a indicator tests, 005 T4 fixture-manifest test.
+4. Reviewer on every task. Quality-lead audit on 003 T1 (money is mandatory) and 005 T3 (fixtures are mandatory).
+
 ## Consequences
 - **One loop (`BarDriver`) and one engine** mean a backtest result and a paper result for the same bars must match exactly. SPEC-005 can test that directly.
 - **Synthetic fixtures** keep the public repo clean and the goldens stable, but CI never sees real market data. Real-data sanity checks are a manual, local step before any strategy passes the gate.

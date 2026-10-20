@@ -8,8 +8,11 @@ Status key: `[ ]` todo · `[~]` in progress · `[x]` done. The PM owns this file
 - [x] `uv` project with pytest and ruff, package skeleton `src/tradebot/`
 
 ## Phase 0.5: Lead research round (option B)
-- [ ] Each of the 5 leads writes a design spec for its area (`docs/specs/001`–`005`)
-- [ ] PM reconciles them into **ADR-0001: Architecture and module interfaces**
+- [x] Each of the 5 leads writes a design spec for its area (`docs/specs/001`–`005`)
+- [x] PM reconciles them into [ADR-0001](adr/ADR-0001-architecture-and-module-contracts.md)
+- [ ] Leads amend specs per ADR-0001 §4
+
+> From here, build order follows the **dispatch waves in ADR-0001 §3**. The phases below group the same work by area.
 
 ## Phase 1: Market data (data-lead)
 - [ ] `DataProvider` interface, plus yfinance and ccxt adapters

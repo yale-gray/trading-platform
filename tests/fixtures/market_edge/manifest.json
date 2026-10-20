@@ -1,0 +1,130 @@
+{
+  "files": {
+    "yfinance/ZZBAD/gen-0001/bars.parquet": {
+      "bytes": 30417,
+      "first": "2018-01-02",
+      "last": "2019-12-31",
+      "rows": 503,
+      "sha256": "098045eaa7950dc240c778f0da1589ac99b890eb8ee53c3b572b6a2739868cf8"
+    },
+    "yfinance/ZZBAD/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "252939382bbb32e0c32b1e02c5aea60fe79eddd5a8178518ab86a3cc569a733b"
+    },
+    "yfinance/ZZBAD/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/ZZDUP/gen-0001/bars.parquet": {
+      "bytes": 31097,
+      "first": "2018-01-02",
+      "last": "2019-12-31",
+      "rows": 504,
+      "sha256": "90448a90650889a1c9d024f419256f4699a2fb03ddd7d721022b3277d0e6fd9e"
+    },
+    "yfinance/ZZDUP/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "c6f467fe3cefa7984930387defc21fa4e135c014bf62a2c304437123b8173e46"
+    },
+    "yfinance/ZZDUP/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/ZZFLAT/gen-0001/bars.parquet": {
+      "bytes": 8093,
+      "first": "2018-01-02",
+      "last": "2019-03-13",
+      "rows": 300,
+      "sha256": "8d2739c56799af41611bba5ec02d6872d59fff8298dcae0780504424413c9696"
+    },
+    "yfinance/ZZFLAT/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "abe7d9197559c5368467cde65b934e07d58c96e160f9b482b5758336011d3a94"
+    },
+    "yfinance/ZZFLAT/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/ZZGAP/gen-0001/bars.parquet": {
+      "bytes": 30687,
+      "first": "2018-01-02",
+      "last": "2019-12-31",
+      "rows": 497,
+      "sha256": "9943daa0bc5597dfe0d399f7e11f61ef93254fdf7121847ea1c9a2d5af7a6a80"
+    },
+    "yfinance/ZZGAP/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "f195d65171b9779d0a8dcbd021acae46a9e81779e8b7c416e1675fd1eab28451"
+    },
+    "yfinance/ZZGAP/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/ZZGONE/gen-0001/bars.parquet": {
+      "bytes": 60777,
+      "first": "2018-01-02",
+      "last": "2022-06-30",
+      "rows": 1132,
+      "sha256": "1fb89e1c5001275145bfcf41234269bc528900f757570b35df8d7156db043172"
+    },
+    "yfinance/ZZGONE/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "7af1b4e4de21271b38d61e5ba5472d92745b2e67c602db075ceb3c2567508325"
+    },
+    "yfinance/ZZGONE/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/ZZNEW/gen-0001/bars.parquet": {
+      "bytes": 53849,
+      "first": "2021-03-01",
+      "last": "2024-12-31",
+      "rows": 967,
+      "sha256": "2db94d08842bc237d440399ce36c2b7fe00acbcbf9e8f026349a0d1fb0a3fa9c"
+    },
+    "yfinance/ZZNEW/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "c3884087f32c699604304334fd2edf528fd113ae627001eb96d45bc95b62eecd"
+    },
+    "yfinance/ZZNEW/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/ZZTZ/gen-0001/bars.parquet": {
+      "bytes": 30885,
+      "first": "2018-01-02",
+      "last": "2019-12-31",
+      "rows": 503,
+      "sha256": "d42a3e3720b634414b866fedfc629073495ae3d3c37a7417f25fb043c7e9ff85"
+    },
+    "yfinance/ZZTZ/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "bad14ee4a56fd16204798e72a3b9b0c6e3235d0b65aa1fa7797bb1eab84d8748"
+    },
+    "yfinance/ZZTZ/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/ZZUP/gen-0001/bars.parquet": {
+      "bytes": 14233,
+      "first": "2018-01-02",
+      "last": "2019-03-13",
+      "rows": 300,
+      "sha256": "c95bd15288e81e971fc7a3d83d1a1d5e03e71c809ca2861198b1660ebcabceab"
+    },
+    "yfinance/ZZUP/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "4fecfc1086c485a3fd5e7543eecabaedc21587bd2d2b118f99fe6fb09a5b10c5"
+    },
+    "yfinance/ZZUP/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    }
+  },
+  "generator": "scripts/make_fixtures.py",
+  "generator_version": 1,
+  "schema": 1,
+  "seed": 20180102,
+  "synthetic": true,
+  "total_bytes": 262238
+}

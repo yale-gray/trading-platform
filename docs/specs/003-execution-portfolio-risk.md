@@ -300,7 +300,7 @@ T2-T5 depend only on T1, so they run in parallel in Wave 2 (T4 takes fee/slip bp
 | `buy_qty(d: Decimal, asset_class: AssetClass) -> Decimal` | dispatches to `floor_shares` (EQUITY) or `floor_qty8` (CRYPTO) | DOWN |
 | `check_sell_qty(qty: Decimal, asset_class: AssetClass) -> Decimal` | SELL quantities are exact, never rounded: returns `qty` unchanged if already on-grid (integral for EQUITY, at most 8 decimals for CRYPTO), else `BadQuantityError`; `qty <= 0` also `BadQuantityError` | none |
 | `q_ratio(d: Decimal) -> Decimal` / `q_weight(d: Decimal) -> Decimal` | quantize to `RATIO_Q` / `WEIGHT_Q` | HALF_EVEN |
-| `to_text(d: Decimal) -> str` | canonical persistence form, `str(d)`; `TypeError` if not `Decimal` | n/a |
+| `to_text(d: Decimal) -> str` | canonical persistence form: `str(d)` computed in the explicit money context (capitals=1), with `-0` normalised to `0` (exponent kept); `TypeError` if not `Decimal` | n/a |
 | `from_text(s: str) -> Decimal` | `Decimal(s)`; `TypeError` if not `str`; `MoneyError` if not finite. Round trip: `from_text(to_text(d)) == d` and has the same exponent | n/a |
 
 **Acceptance criteria (each is a unit test):**

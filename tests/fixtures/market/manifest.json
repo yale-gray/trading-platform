@@ -1,0 +1,310 @@
+{
+  "files": {
+    "coinbaseexchange/BTC_USD/gen-0001/bars.parquet": {
+      "bytes": 139606,
+      "first": "2018-01-02",
+      "last": "2024-12-31",
+      "rows": 2556,
+      "sha256": "71fe89f2f5c8ab28990331bff70af5b4283504cfe51258df81f37799acccccb7"
+    },
+    "coinbaseexchange/BTC_USD/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "1ccb4a0196eb559daefb40a245d2e57916da676f47e1504d92c17b66bb689830"
+    },
+    "coinbaseexchange/BTC_USD/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "coinbaseexchange/ETH_USD/gen-0001/bars.parquet": {
+      "bytes": 135435,
+      "first": "2018-01-02",
+      "last": "2024-12-31",
+      "rows": 2556,
+      "sha256": "ce8b7af3523560e22bc4b4bb099a4b8d49bf5267ee48e86c67782d28287d636d"
+    },
+    "coinbaseexchange/ETH_USD/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "c4b26c746506f04949381b02fb447d02b70787a3b5a7cdff4a9b1fe5d9c252e1"
+    },
+    "coinbaseexchange/ETH_USD/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "coinbaseexchange/SOL_USD/gen-0001/bars.parquet": {
+      "bytes": 85971,
+      "first": "2020-04-10",
+      "last": "2024-12-31",
+      "rows": 1727,
+      "sha256": "6f0bc2597d8338536e0fb7eb3bfbec8aef58f5181b2b0e546f0d834fbaf71362"
+    },
+    "coinbaseexchange/SOL_USD/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "c09b1e34694c309356a1a20641c7f751f5093e2f5af187d2b6da6fe6a93cec58"
+    },
+    "coinbaseexchange/SOL_USD/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/EEM/gen-0001/bars.parquet": {
+      "bytes": 88977,
+      "first": "2018-01-02",
+      "last": "2024-12-31",
+      "rows": 1761,
+      "sha256": "7c73cc4afeef52a4ba50517401fe33de7b0a8558d1b83083773ba44425136866"
+    },
+    "yfinance/EEM/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "5463ef0d22c2a843d44f561e00e57d1fb99e93627caa9d36ce5890d3ea60a003"
+    },
+    "yfinance/EEM/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/EFA/gen-0001/bars.parquet": {
+      "bytes": 95202,
+      "first": "2018-01-02",
+      "last": "2024-12-31",
+      "rows": 1761,
+      "sha256": "1b5f986beac16c9e3e0cbfe1befc31190f86f4db80b5956c9390d4c200a4982a"
+    },
+    "yfinance/EFA/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "520774c333ac2cd739f25f7b5959858d13baa036ab240dd88e903874f2eeaf38"
+    },
+    "yfinance/EFA/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/GLD/gen-0001/bars.parquet": {
+      "bytes": 88633,
+      "first": "2018-01-02",
+      "last": "2024-12-31",
+      "rows": 1761,
+      "sha256": "575a48ecd6d3d9654354b42d88f9904cbe77912451bbbba4e5af84dd00317a0b"
+    },
+    "yfinance/GLD/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "61d1b85f1f23c885f7da1132ed5e4faca704499faa5647c7fecb49718dbc265c"
+    },
+    "yfinance/GLD/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/IEF/gen-0001/bars.parquet": {
+      "bytes": 93341,
+      "first": "2018-01-02",
+      "last": "2024-12-31",
+      "rows": 1761,
+      "sha256": "c9714afcc48d163b2fc837681066893aa1e24da3ca4f8143b7bf281d3227c571"
+    },
+    "yfinance/IEF/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "0e1d9c24717144a6f7c61efaf5ff8f256dc47148aca684327f213c29def9dea0"
+    },
+    "yfinance/IEF/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/IWM/gen-0001/bars.parquet": {
+      "bytes": 90089,
+      "first": "2018-01-02",
+      "last": "2024-12-31",
+      "rows": 1761,
+      "sha256": "7251eeb14f6badd3ddaff498e7f50bcd2ca650b9609105c23bdbffc4718e1484"
+    },
+    "yfinance/IWM/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "9617d8d812471a55a5d7a733f34bb872d482ecf130e031aed458b4954ec1a18f"
+    },
+    "yfinance/IWM/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/QQQ/gen-0001/bars.parquet": {
+      "bytes": 89158,
+      "first": "2018-01-02",
+      "last": "2024-12-31",
+      "rows": 1761,
+      "sha256": "33cf0f7c1dec28158d2ca0500fec42a3e62730affae040ca0c2ef299d53374fe"
+    },
+    "yfinance/QQQ/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "67c508210147e830fd386e5b52cb7771f21cd7d5b7fdd2caa53a2502eab13e87"
+    },
+    "yfinance/QQQ/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/SPY/gen-0001/bars.parquet": {
+      "bytes": 92392,
+      "first": "2018-01-02",
+      "last": "2024-12-31",
+      "rows": 1761,
+      "sha256": "5b1a42caaa02c6ae41f7fb601851a181b95a87f9dd31332a379a0b9c5e87d2ec"
+    },
+    "yfinance/SPY/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "3e8dbbb9e079873d7af9e5c503e0e126d6d4e392c766ea50ab5304346937abc0"
+    },
+    "yfinance/SPY/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/TLT/gen-0001/bars.parquet": {
+      "bytes": 91545,
+      "first": "2018-01-02",
+      "last": "2024-12-31",
+      "rows": 1761,
+      "sha256": "afad0b4e8f509cb4c714328d1e88d3c10acc57d1b36da64d834ca78f9304f05b"
+    },
+    "yfinance/TLT/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "03d72ca121ac0a6b60c58e458525acc9af912d131aacd1139ae75306e35706b8"
+    },
+    "yfinance/TLT/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/XLB/gen-0001/bars.parquet": {
+      "bytes": 89184,
+      "first": "2018-01-02",
+      "last": "2024-12-31",
+      "rows": 1761,
+      "sha256": "bd27cb16eaf51a5363912ad351d7737b48ad991ce5058585eac6edeca63e4a8c"
+    },
+    "yfinance/XLB/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "9355905384714b07c2162fe9e300482d58491c16041317896636f347f7af6d60"
+    },
+    "yfinance/XLB/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/XLE/gen-0001/bars.parquet": {
+      "bytes": 94681,
+      "first": "2018-01-02",
+      "last": "2024-12-31",
+      "rows": 1761,
+      "sha256": "d27946e3c6f3ab825677ea2fc7fab2e7cff3ab9a39be63d36ced51ec9287e50a"
+    },
+    "yfinance/XLE/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "7b71672124f700b4907c10d4e9826779ddd5688008a26f6a751bdf0cfe4bb960"
+    },
+    "yfinance/XLE/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/XLF/gen-0001/bars.parquet": {
+      "bytes": 90780,
+      "first": "2018-01-02",
+      "last": "2024-12-31",
+      "rows": 1761,
+      "sha256": "1c7389fc227c2ff95b3524ec851bd1044dcc137c2a2a62f7e166785960a66521"
+    },
+    "yfinance/XLF/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "c4095a9de4cb43b8e5b4b65b6c080d963e418b9ab0bf767290682d10bde3db18"
+    },
+    "yfinance/XLF/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/XLI/gen-0001/bars.parquet": {
+      "bytes": 92671,
+      "first": "2018-01-02",
+      "last": "2024-12-31",
+      "rows": 1761,
+      "sha256": "f67ccdbfb58110cf9220d7809c37eea8a28ddc3b1ef7b0059952f60d4d16b3d2"
+    },
+    "yfinance/XLI/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "168680b43e3feda1ae3fed2b8f1211cc1801dfa91b720f667f20d2e1a22d76e4"
+    },
+    "yfinance/XLI/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/XLK/gen-0001/bars.parquet": {
+      "bytes": 92894,
+      "first": "2018-01-02",
+      "last": "2024-12-31",
+      "rows": 1761,
+      "sha256": "95038e0867b567180dff610fc2329ce8e9cd6f05c3421ed6de45bf281496af6c"
+    },
+    "yfinance/XLK/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "45c7d286ebeb294515d2a6fac4bb8b8ed3bd121a47444f3f99896dad61fbe075"
+    },
+    "yfinance/XLK/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/XLP/gen-0001/bars.parquet": {
+      "bytes": 88409,
+      "first": "2018-01-02",
+      "last": "2024-12-31",
+      "rows": 1761,
+      "sha256": "43e16a516efe6a016fbea754420267eaa239365527520a38ce7b443051c4b2f4"
+    },
+    "yfinance/XLP/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "3e49a1a380c28a7a707b74917af60884612613f99baede0afc0d2210b13eff63"
+    },
+    "yfinance/XLP/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/XLU/gen-0001/bars.parquet": {
+      "bytes": 88670,
+      "first": "2018-01-02",
+      "last": "2024-12-31",
+      "rows": 1761,
+      "sha256": "4fee6637036fdc9c283f1ca491aa39e119a8c237d2f66c8b0f52bed4481e7a52"
+    },
+    "yfinance/XLU/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "3c2d9b800028830792599e5837e351b9a0c03fb9ab9ec4417d3984bc6f36f34c"
+    },
+    "yfinance/XLU/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/XLV/gen-0001/bars.parquet": {
+      "bytes": 93684,
+      "first": "2018-01-02",
+      "last": "2024-12-31",
+      "rows": 1761,
+      "sha256": "04237077026a7d80105b654ae1f99f13450a878564c0093c60edfa56456ade4c"
+    },
+    "yfinance/XLV/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "42728b575c731fa7f57866dac39f9c2b6cef4ddead01d0dd6e2f8d0256cd2dbb"
+    },
+    "yfinance/XLV/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    },
+    "yfinance/XLY/gen-0001/bars.parquet": {
+      "bytes": 96030,
+      "first": "2018-01-02",
+      "last": "2024-12-31",
+      "rows": 1761,
+      "sha256": "9212bba25f5a486368dff38019ff8263e62a48f5accbb5c3b666fa75946bfbfa"
+    },
+    "yfinance/XLY/gen-0001/gen.json": {
+      "bytes": 223,
+      "sha256": "879f83a8ee0860f0dfafc92b3a03a63add3372cc8beae3d05b9e7697a437f83d"
+    },
+    "yfinance/XLY/meta.json": {
+      "bytes": 52,
+      "sha256": "fec3d5b4447d17a2d124d2b3579556119e58d113670f293c7409c629d61516a1"
+    }
+  },
+  "generator": "scripts/make_fixtures.py",
+  "generator_version": 1,
+  "schema": 1,
+  "seed": 20180102,
+  "synthetic": true,
+  "total_bytes": 1922852
+}

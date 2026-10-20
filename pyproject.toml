@@ -55,7 +55,11 @@ markers = [
     "restart: runner crash/restart and idempotency tests",
     "slow: tests over 2 seconds",
 ]
-filterwarnings = ["error"]
+filterwarnings = [
+    "error",
+    # exchange-calendars 4.13 on numpy 2.x; remove when exchange-calendars is upgraded
+    "ignore:The 'generic' unit for NumPy timedelta is deprecated:DeprecationWarning",
+]
 
 [tool.coverage.run]
 branch = true

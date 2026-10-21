@@ -1,0 +1,19 @@
+schema_version: 1
+id: mean_reversion
+name: RSI(2) pullback in an uptrend
+kind: rules
+asset_class: equity
+parameters: {rsi_len: 2, rsi_entry: 10, rsi_exit: 70, trend_len: 200, max_hold: 5, atr_len: 14, stop_mult: 2.5}
+universe: [SPY, QQQ]
+schedule: {freq: daily}
+entry:
+  all:
+    - lt: [{ind: rsi, period: $rsi_len}, $rsi_entry]
+    - gt: [{price: close}, {ind: sma, period: $trend_len}]
+exit:
+  any:
+    - gt: [{ind: rsi, period: $rsi_len}, $rsi_exit]
+    - ge: [{pos: bars_held}, $max_hold]      # time exit
+position: {weight: equal}
+stops:
+  - {type: atr_trailing, period: $atr_len, mult: $stop_mult, anchor: highest_close_since_entry}

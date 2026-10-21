@@ -1,0 +1,14 @@
+schema_version: 1
+id: core_momentum
+name: Trend-filtered ETF momentum
+kind: rotation
+asset_class: equity
+parameters: {mom_lookback: 126, trend_len: 200, top_n: 3}   # 126 bars ~ 6 months
+universe: [SPY, QQQ, IWM, EFA, EEM, TLT, GLD, XLK, XLF, XLE, XLV, XLI, XLY, XLP, XLU, XLB]
+schedule: {freq: monthly}
+eligibility:                       # 200-day SMA trend filter
+  gt: [{price: close}, {ind: sma, period: $trend_len}]
+filter_mode: pre_rank
+rank: {by: {ind: ret, period: $mom_lookback}, order: desc}
+select: {top: $top_n, weighting: equal}
+fallback: {symbol: IEF}            # empty slots -> IEF; omit this block for cash

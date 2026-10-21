@@ -25,6 +25,10 @@ One row per dispatched task. We use this to judge whether the Opus PM → Sonnet
 | 2026-10-20 | 002 T7a indicator tests | test-engineer | Haiku | done | 0 | no | 48 tests incl. truncation invariance |
 | 2026-10-20 | Wave 1 review | reviewer | Sonnet | done | n/a | n/a | 9/9 approve, 0 blocking; non-blocking notes were worth acting on |
 | 2026-10-20 | Wave 1 audits | quality-lead | Sonnet | done | n/a | n/a | Money + fixtures PASS-WITH-NOTES |
+| 2026-10-20 | Wave 2: 26 tasks | 8 engineer / 18 junior+test | Sonnet / Haiku | done | 0 | no | Dispatched in dependency stages A–E; 0 Haiku escalations |
+| 2026-10-20 | Wave 2 review | reviewer | Sonnet | done | n/a | n/a | 8/8 approve, 0 blocking; good design questions (pos in entry, cross-asset refs) |
+| 2026-10-20 | Wave 2 audits | quality-lead ×2 | Sonnet | done | n/a | n/a | Execution: 5 majors (stale stop overlay, ambient context, fill without fee, float coercion, zero ledger tests). Data: 4 majors (non-atomic append, 1-bar overlap, uncalibrated tol / wedge, untested cutoff) |
+| 2026-10-20 | Wave 2 fixes | engineer ×4, junior ×1 | Sonnet / Haiku | done | 1 | no | Split by file so 3 fixers ran in parallel; PM relayed API changes between two data fixers mid-flight |
 
 ## Retrospective notes
 ### Lead research round (2026-10-20)
@@ -37,5 +41,11 @@ One row per dispatched task. We use this to judge whether the Opus PM → Sonnet
 - **Parallel workers in one checkout worked** because file lists were disjoint and workers were told to lint/test only their own files. No worktrees needed.
 - **The review layers paid off.** The reviewer found a date-dependent calendar, and quality-lead found numpy values being rejected by the money module. Neither was caught by the workers' own tests, because each test only checked what its spec listed.
 - **Cross-task issues still land on the PM**: a duplicate AssetClass and a shared library warning. Next time, specs should name a single owner for shared types up front.
+
+### Wave 2 (2026-10-20)
+- **Staged dispatch worked well**: 26 tasks with a 6-deep dependency chain in data finished cleanly by unlocking each task the moment its inputs landed.
+- **Audits found what tests didn't, again.** Every major came from quality-lead, not the reviewer or workers' own tests. The worst ones were the stale stop level on re-entry, the fee-less fill, and the one-bar "restatement" that would have permanently corrupted prices. Mutation probing ("does any test fail if I flip this sign?") was the single most useful audit technique; worth making it standard in the audit template.
+- **Spec gaps cluster at seams**: the 6-letter fixture names vs the 5-letter ticker rule, the basis label for crypto, where STRATEGIES lives. Workers flag these well when asked to report decisions.
+- **Haiku continues to hold up** on precise tasks (0 escalations in 18 Haiku tasks). It did once state a wrong fact (claimed yfinance was not installed) — PM verification of surprising claims matters.
 
 <!-- After each phase: what worked, what didn't, routing-rule changes -->

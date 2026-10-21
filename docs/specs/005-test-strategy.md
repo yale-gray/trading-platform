@@ -484,6 +484,7 @@ Per CLAUDE.md routing, tags are `[sonnet]` or `[haiku]`. Each task carries its *
 
 ### T10 [haiku] Wave 2: audit report template
 - **Files:** `docs/reviews/_TEMPLATE.md`
+- **PM note (2026-10-20):** the committed `docs/reviews/_TEMPLATE.md` is an accepted expansion of the section 8 block (adds checklist evidence, mutation/test-strength and re-audit sections). The file is canonical; severity scale is blocker/major/minor/nit.
 - **Depends on:** none
 - **Do:** copy the template from section 8 verbatim.
 - **Done when:** the file exists.

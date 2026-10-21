@@ -1,0 +1,181 @@
+"""Sleeve/portfolio accounting over the ledger fold, and equity snapshots (spec 003 §9)."""
+
+from __future__ import annotations
+
+from collections.abc import Collection, Mapping
+from datetime import date
+from decimal import Decimal
+
+from tradebot.portfolio.ledger import ZERO, Ledger, LedgerError, LedgerState, replay
+from tradebot.portfolio.models import (
+    PortfolioSnapshot,
+    Position,
+    PositionSnapshot,
+    SleeveSnapshot,
+)
+from tradebot.portfolio.money import money_context, q2, q_ratio, q_weight
+
+
+class Portfolio:
+    """Sleeves (cash + positions) derived from a :class:`Ledger`.
+
+    ``high_water_close`` / ``stop_level`` are carried on positions as overlay
+    state (Wave 3 maintains them); cash and quantities come only from the fold.
+    Each overlay entry is tagged with the fold's ``opened_seq`` for that
+    position, so it applies only to the holding episode it was set for: once the
+    position goes flat, the entry is dead and a re-entry starts fresh (SPEC-003
+    §7), however the ledger was appended to.
+    """
+
+    def __init__(self, ledger: Ledger | None = None) -> None:
+        self.ledger = ledger if ledger is not None else Ledger()
+        # (sleeve, symbol) -> (opened_seq, high_water_close, stop_level)
+        self._overlay: dict[tuple[str, str], tuple[int, Decimal | None, Decimal | None]] = {}
+
+    @property
+    def sleeve_ids(self) -> list[str]:
+        return sorted(self.ledger.state.cash)
+
+    def cash(self, sleeve_id: str) -> Decimal:
+        return self.ledger.state.cash[sleeve_id]
+
+    def positions(self, sleeve_id: str) -> dict[str, Position]:
+        """Positions of a sleeve with the stop overlay applied."""
+        out: dict[str, Position] = {}
+        state = self.ledger.state
+        for sym, p in sorted(state.positions.get(sleeve_id, {}).items()):
+            hw: Decimal | None = None
+            stop: Decimal | None = None
+            entry = self._overlay.get((sleeve_id, sym))
+            if entry is not None:
+                if entry[0] == state.opened_seq[(sleeve_id, sym)]:
+                    _, hw, stop = entry
+                else:
+                    del self._overlay[(sleeve_id, sym)]
+            out[sym] = p.model_copy(update={"high_water_close": hw, "stop_level": stop})
+        return out
+
+    def set_stop_fields(
+        self,
+        sleeve_id: str,
+        symbol: str,
+        high_water_close: Decimal | None,
+        stop_level: Decimal | None,
+    ) -> None:
+        """Record trailing-stop state for an open position (dropped when the position goes flat)."""
+        state = self.ledger.state
+        if symbol not in state.positions.get(sleeve_id, {}):
+            raise LedgerError(f"no open position {symbol} in {sleeve_id}")
+        self._overlay[(sleeve_id, symbol)] = (
+            state.opened_seq[(sleeve_id, symbol)],
+            high_water_close,
+            stop_level,
+        )
+
+    def snapshot(
+        self,
+        asof: date,
+        closes: Mapping[str, Decimal],
+        *,
+        peak_equity: Decimal | None = None,
+        killed: bool = False,
+        crypto_symbols: Collection[str] = (),
+    ) -> PortfolioSnapshot:
+        """Mark every position at ``closes`` and compute the equity snapshot."""
+        with money_context():
+            return self._snapshot(asof, closes, peak_equity, killed, crypto_symbols)
+
+    def _snapshot(
+        self,
+        asof: date,
+        closes: Mapping[str, Decimal],
+        peak_equity: Decimal | None,
+        killed: bool,
+        crypto_symbols: Collection[str],
+    ) -> PortfolioSnapshot:
+        state = self.ledger.state
+        marked: list[tuple[str, Decimal, list[PositionSnapshot]]] = []
+        for sid in sorted(state.cash):
+            pss: list[PositionSnapshot] = []
+            for sym, p in self.positions(sid).items():
+                if sym not in closes:
+                    raise LedgerError(f"no close to mark {sym}")
+                mv = q2(p.qty * closes[sym])
+                pss.append(
+                    PositionSnapshot(
+                        symbol=sym,
+                        qty=p.qty,
+                        mv=mv,
+                        cost_basis=p.cost_basis,
+                        unrealized=mv - p.cost_basis,
+                        entry_asof=p.entry_asof,
+                        high_water_close=p.high_water_close,
+                        stop_level=p.stop_level,
+                    )
+                )
+            eq = state.cash[sid] + sum((x.mv for x in pss), ZERO)
+            marked.append((sid, eq, pss))
+        equity = sum((eq for _, eq, _ in marked), ZERO)
+        sleeves = [
+            SleeveSnapshot(
+                sleeve_id=sid,
+                cash=state.cash[sid],
+                equity=eq,
+                weight=q_weight(eq / equity) if equity > 0 else Decimal("0.000000"),
+                positions=pss,
+            )
+            for sid, eq, pss in marked
+        ]
+        by_symbol: dict[str, Decimal] = {}
+        for _, _, pss in marked:
+            for x in pss:
+                by_symbol[x.symbol] = by_symbol.get(x.symbol, ZERO) + x.mv
+        peak = max(peak_equity if peak_equity is not None else equity, equity)
+        crypto = set(crypto_symbols)
+
+        def frac(v: Decimal) -> Decimal:
+            return q_weight(v / equity) if equity > 0 else Decimal("0.000000")
+
+        return PortfolioSnapshot(
+            asof=asof,
+            equity=equity,
+            cash=sum(state.cash.values(), ZERO),
+            drawdown=q_ratio(1 - equity / peak) if peak > 0 else q_ratio(Decimal(0)),
+            peak_equity=peak,
+            killed=killed,
+            last_seq=state.last_seq,
+            sleeves=sleeves,
+            exposures={s: frac(v) for s, v in sorted(by_symbol.items())},
+            crypto_fraction=frac(sum((v for s, v in by_symbol.items() if s in crypto), ZERO)),
+        )
+
+    def verify(self, snap: PortfolioSnapshot) -> None:
+        """Check I1, I2, I3, I5, I6 and I18 against ``snap``; raises ``LedgerError``."""
+        with money_context():
+            self._verify(snap)
+
+    def _verify(self, snap: PortfolioSnapshot) -> None:
+        state: LedgerState = self.ledger.state
+        again = replay(self.ledger.events)
+        if again.cash != state.cash or again.positions != state.positions:
+            raise LedgerError("I5: replay does not reproduce state")
+        total_mv = ZERO
+        for s in snap.sleeves:
+            mv = sum((p.mv for p in s.positions), ZERO)
+            total_mv += mv
+            if s.cash + mv != s.equity:
+                raise LedgerError(f"I1: sleeve {s.sleeve_id}")
+            if s.cash < 0:
+                raise LedgerError(f"I3: sleeve {s.sleeve_id} cash < 0")
+            if s.cash != state.cash[s.sleeve_id]:
+                raise LedgerError(f"I5: sleeve {s.sleeve_id} cash != fold")
+            for p in s.positions:
+                if p.qty <= 0 or p.entry_asof is None:
+                    raise LedgerError(f"I18: {s.sleeve_id}/{p.symbol}")
+        if snap.cash + total_mv != snap.equity:
+            raise LedgerError("I1: portfolio")
+        if sum((s.equity for s in snap.sleeves), ZERO) != snap.equity:
+            raise LedgerError("I2")
+        unreal = sum((p.unrealized for s in snap.sleeves for p in s.positions), ZERO)
+        if state.deposits + state.realized - state.fees + unreal != snap.equity:
+            raise LedgerError("I6")

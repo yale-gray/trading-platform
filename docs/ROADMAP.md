@@ -17,8 +17,20 @@ Status key: `[ ]` todo · `[~]` in progress · `[x]` done. The PM owns this file
 - [x] Data types + trading calendar (001 T1, T3) · Money module + tests (003 T1, T11a) · Indicators + tests (002 T2, T7a)
 - [x] Reviewer: 9/9 approved · Quality-lead audits: money + fixtures PASS-WITH-NOTES, fixes applied
 
-## Wave 2: Data + schema (next)
-- [ ] 001 cache/providers/validation · 002 T1 schema · 003 T2–T5 config, orders, costs, ledger
+## Wave 2: Data + schema (done 2026-10-20)
+- [x] 001 T2–T13: symbols, quality, crash-safe parquet cache, restatement, ccxt + yfinance + fixture providers, universe, `MarketData` facade
+- [x] 002 T1 strategy schema + 3 sleeve YAMLs (+ T7b schema tests, pulled forward)
+- [x] 003 T2–T5 config, orders, costs, ledger/portfolio (+ T11b tests, ledger tests from audit)
+- [x] 004 T2 settings/logging · 005 T5–T10 hand-calc, lookahead, data-quality tests, coverage checker, audit template
+- [x] Live smoke checks: Coinbase daily buckets at 00:00 UTC, SOL/USD from 2021-06-17; Yahoo SPY adjusted bars OK
+- [x] Reviewer 8/8 approve · audits: execution + data PASS-WITH-NOTES, majors fixed, re-audited
+
+## Wave 3: Engine (next)
+- [ ] 003 T6–T10 risk checks, stops + kill switch, SimBroker, rebalancer, `PortfolioEngine` · 002 T3 evaluate
+- [ ] Carried over from Wave 2 audits: persist stop overlay in `EngineState`; I4/I7 transfer-pair checks; execution minors F7, F10–F14 (fill grids, duplicate fill ids, FEE linkage, DEPOSIT rules, non-positive close, verify cost, cent exponent); config tests
+- [ ] Move `RevisionQuarantinedError` to `data/errors.py` and re-export; fix SPEC-001 "price-return-like" wording
+- [ ] Strategy evaluator must normalize `required_symbols()` before data lookups
+- [ ] Re-audit residual minors (see docs/reviews/*wave2*): ledger-from-events FILL without FEE, state copy cost, zero-proceeds SELL, qty precision; data head-prepend report-once, multi-process read retry, dir fsync, data F11/F12/F14/F15
 
 > From here, build order follows the **dispatch waves in ADR-0001 §3**. The phases below group the same work by area.
 

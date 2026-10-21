@@ -1,0 +1,17 @@
+schema_version: 1
+id: crypto_trend
+name: Crypto SMA 20/50 trend
+kind: rules
+asset_class: crypto
+parameters: {fast: 20, slow: 50, atr_len: 14, stop_mult: 2.5}
+constraints: ["fast < slow"]
+universe: [BTC/USD, ETH/USD, SOL/USD]
+schedule: {freq: daily}
+entry:
+  all:
+    - gt: [{price: close}, {ind: sma, period: $slow}]
+    - gt: [{ind: sma, period: $fast}, {ind: sma, period: $slow}]
+# exit omitted => hold-while: exit when NOT entry
+position: {weight: equal}
+stops:
+  - {type: atr_trailing, period: $atr_len, mult: $stop_mult, anchor: highest_close_since_entry}

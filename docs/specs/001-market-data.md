@@ -44,7 +44,7 @@ Provide clean, cached, bias-free **daily** OHLCV bars for the STRATEGY.md univer
 - **Fallback: Kraken (`ccxt.kraken`, `XBT/USD` handled by ccxt as `BTC/USD`).** Kraken OHLC returns max 720 candles per call (~2 years daily) and recommends >=1 s between calls; its guide says omitting `since` returns the oldest data and you page forward with the returned `last`, but we have not verified this against ccxt's wrapper. [Kraken historical data guide](https://docs.kraken.com/exchange/guides/general/historical-data) Exchange id is config (`crypto_exchange: str = "coinbaseexchange"`), so swapping is a config change.
 - ccxt `fetch_ohlcv(symbol, timeframe, since_ms, limit)` is the uniform call; `exchange.timeframes` lists supported timeframes (not all exchanges support all). Source: [ccxt manual / examples](https://docs.ccxt.com/docs/examples/py/async-kucoin-rate-limit).
 
-Crypto coverage caveat: Coinbase SOL-USD listing started in 2021, so 5-year SOL history (STRATEGY validation gate) may be short. Surfaced as a risk and an open question.
+Crypto coverage caveat: Coinbase SOL-USD history starts **2021-06-17** (confirmed by the manual smoke run, 2026-10-20), so 5-year SOL history is short. Resolved by ADR-0001 D10: the history gate is measured on the strategy calendar, and SOL stays ineligible (NaN) until it has enough bars.
 
 ### 3. Architecture
 ```

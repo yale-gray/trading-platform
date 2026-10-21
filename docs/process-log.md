@@ -29,6 +29,9 @@ One row per dispatched task. We use this to judge whether the Opus PM → Sonnet
 | 2026-10-20 | Wave 2 review | reviewer | Sonnet | done | n/a | n/a | 8/8 approve, 0 blocking; good design questions (pos in entry, cross-asset refs) |
 | 2026-10-20 | Wave 2 audits | quality-lead ×2 | Sonnet | done | n/a | n/a | Execution: 5 majors (stale stop overlay, ambient context, fill without fee, float coercion, zero ledger tests). Data: 4 majors (non-atomic append, 1-bar overlap, uncalibrated tol / wedge, untested cutoff) |
 | 2026-10-20 | Wave 2 fixes | engineer ×4, junior ×1 | Sonnet / Haiku | done | 1 | no | Split by file so 3 fixers ran in parallel; PM relayed API changes between two data fixers mid-flight |
+| 2026-10-21 | SPEC-006 dev console | platform-lead | Sonnet | done | 0 | no | Spec in ~3 min; 14 tasks with a clean dependency graph |
+| 2026-10-21 | 006 T1–T14 | engineer ×4 / junior+test ×12 | Sonnet / Haiku | done | 1 | no | 0 Haiku escalations; workers caught an interface mismatch (period vs n) and a stale roadmap |
+| 2026-10-21 | 006 review | reviewer | Sonnet | done | 1 | n/a | REQUEST-CHANGES: chart RSI/ATR/EMA off by up to ~5 points (short warmup) and a wall-clock read; fixed and re-reviewed |
 
 ## Retrospective notes
 ### Lead research round (2026-10-20)
@@ -47,5 +50,10 @@ One row per dispatched task. We use this to judge whether the Opus PM → Sonnet
 - **Audits found what tests didn't, again.** Every major came from quality-lead, not the reviewer or workers' own tests. The worst ones were the stale stop level on re-entry, the fee-less fill, and the one-bar "restatement" that would have permanently corrupted prices. Mutation probing ("does any test fail if I flip this sign?") was the single most useful audit technique; worth making it standard in the audit template.
 - **Spec gaps cluster at seams**: the 6-letter fixture names vs the 5-letter ticker rule, the basis label for crypto, where STRATEGIES lives. Workers flag these well when asked to report decisions.
 - **Haiku continues to hold up** on precise tasks (0 escalations in 18 Haiku tasks). It did once state a wrong fact (claimed yfinance was not installed) — PM verification of surprising claims matters.
+
+### Mini-wave 2.5: dev console (2026-10-21)
+- **Reviewer earned its keep on a "non-critical" UI**: the indicator charts would have shown RSI values up to ~5 points different from what the strategy computes — the kind of silent mismatch that erodes trust in a dashboard. Measured, not eyeballed.
+- **Looking at the running app early helped**: the PM preview caught the late-starting SMA line before review did.
+- **Seam bugs again** (period vs n between two helper modules written in parallel). Exact signatures in the spec prevent most, but cross-module data shapes need the same precision.
 
 <!-- After each phase: what worked, what didn't, routing-rule changes -->

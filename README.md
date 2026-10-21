@@ -11,4 +11,14 @@ uv sync
 uv run pytest
 ```
 
+## Dev console (local)
+
+A read-only Streamlit app for looking at the project between build waves: progress, price charts, the strategies in plain English, a cost sandbox, and review reports. It shows generated practice data by default and never trades or changes anything.
+
+```bash
+uv run streamlit run devconsole/app.py
+```
+
+Then open http://localhost:8501 in your browser.
+
 Not financial advice.

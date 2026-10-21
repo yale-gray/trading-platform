@@ -25,6 +25,10 @@ Status key: `[ ]` todo · `[~]` in progress · `[x]` done. The PM owns this file
 - [x] Live smoke checks: Coinbase daily buckets at 00:00 UTC, SOL/USD from 2021-06-17; Yahoo SPY adjusted bars OK
 - [x] Reviewer 8/8 approve · audits: execution + data PASS-WITH-NOTES, majors fixed, re-audited
 
+## Mini-wave 2.5: Local dev console (done 2026-10-21)
+- [x] [SPEC-006](specs/006-dev-console.md): Streamlit app at `devconsole/` (Overview, Market data, Strategies, Cost sandbox, Quality & reviews). Read-only, synthetic data by default. Run: `uv run streamlit run devconsole/app.py`
+- Grows later: trades after Wave 3, backtests after Wave 4, merges into `dashboard/` in Wave 5
+
 ## Wave 3: Engine (next)
 - [ ] 003 T6–T10 risk checks, stops + kill switch, SimBroker, rebalancer, `PortfolioEngine` · 002 T3 evaluate
 - [ ] Carried over from Wave 2 audits: persist stop overlay in `EngineState`; I4/I7 transfer-pair checks; execution minors F7, F10–F14 (fill grids, duplicate fill ids, FEE linkage, DEPOSIT rules, non-positive close, verify cost, cent exponent); config tests
@@ -32,28 +36,16 @@ Status key: `[ ]` todo · `[~]` in progress · `[x]` done. The PM owns this file
 - [ ] Strategy evaluator must normalize `required_symbols()` before data lookups
 - [ ] Re-audit residual minors (see docs/reviews/*wave2*): ledger-from-events FILL without FEE, state copy cost, zero-proceeds SELL, qty precision; data head-prepend report-once, multi-process read retry, dir fsync, data F11/F12/F14/F15
 
-> From here, build order follows the **dispatch waves in ADR-0001 §3**. The phases below group the same work by area.
+## Wave 4: Backtester (planned)
+- [ ] 002 `BarDriver` + `TargetBook` + `trades.py`, metrics, backtest engine, OOS split, walk-forward, ±20% sensitivity, validation gate
+- [ ] Property and invariant tests (003 T12, 002 T9), golden backtests G1–G4 on the synthetic fixtures
+- [ ] The 3 sleeves from STRATEGY.md backtested against buy-and-hold
 
-## Phase 1: Market data (data-lead)
-- [ ] `DataProvider` interface, plus yfinance and ccxt adapters
-- [ ] Parquet cache, UTC timestamps, gap and duplicate checks
-- [x] Offline fixture dataset for tests (synthetic, ADR-0001 D9)
+## Wave 5: Paper trading + dashboard (planned)
+- [ ] SQLite persistence, restart-safe APScheduler runner, engine checkpoints (004)
+- [ ] FastAPI endpoints, unified `tradebot` CLI
+- [ ] Streamlit dashboard (dev console pages merge in): portfolios, equity vs benchmark, positions, trades, perf cards
 
-## Phase 2: Strategy and backtest (strategy-lead + execution-lead)
-- [ ] Strategy schema, plus indicators (SMA, EMA, RSI, MACD, Bollinger, ATR, returns)
-- [ ] Event-driven backtester (*t* → *t+1* fills), fees, slippage
-- [ ] Metrics, benchmark comparison, OOS split, walk-forward, ±20% sensitivity
-- [ ] The 3 sleeves from STRATEGY.md encoded and backtested
-
-## Phase 3: Paper trading (execution-lead + platform-lead)
-- [ ] SimBroker, ledger, portfolios with sleeves, monthly rebalance
-- [ ] Sizing, limits, ATR stops, kill switch
-- [ ] SQLite persistence and the APScheduler runner (restart-safe)
-
-## Phase 4: API and dashboard (platform-lead)
-- [ ] FastAPI endpoints
-- [ ] Streamlit: portfolios, equity vs benchmark, positions, trades, perf cards
-
-## Phase 5: AI and templates
+## Phase 6: AI and templates (later)
 - [ ] Claude plain-English → strategy schema builder
 - [ ] Template library, fork/clone, alerts

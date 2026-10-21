@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Annotated, Any, NoReturn
 
@@ -23,7 +23,14 @@ from pydantic import (
     model_validator,
 )
 
-from tradebot.portfolio.money import from_text, money_context, q2, to_text
+from tradebot.portfolio.money import (
+    PRICE_Q,
+    QTY8_Q,
+    from_text,
+    money_context,
+    q2,
+    to_text,
+)
 
 
 def _parse_decimal(v: Any) -> Any:
@@ -40,6 +47,29 @@ Dec = Annotated[
     BeforeValidator(_parse_decimal),
     PlainSerializer(to_text, return_type=str, when_used="always"),
 ]
+
+
+def on_grid(d: Decimal, quantum: Decimal) -> bool:
+    """True if ``d`` is finite and has no digits below ``quantum`` (e.g. 1E-8)."""
+    if not d.is_finite():
+        return False
+    try:
+        with money_context():
+            return d == d.quantize(quantum, rounding=ROUND_DOWN)
+    except InvalidOperation:
+        return False
+
+
+def canon_cents(v: Decimal | None) -> Decimal | None:
+    """Return ``v`` with the canonical cent exponent (-2) when it is on the cent grid.
+
+    Off-grid values are returned unchanged so the shape check can reject them.
+    ``Decimal("1E+2")`` and ``Decimal("100")`` both become ``Decimal("100.00")``.
+    """
+    if v is None or not v.is_finite():
+        return v
+    cents = q2(v)
+    return cents if cents == v else v
 
 
 class FrozenDict(dict[str, str]):
@@ -124,6 +154,11 @@ class LedgerEvent(BaseModel):
     realized_pnl: Dec | None = None
     metadata: Mapping[str, str] = Field(default_factory=FrozenDict)
 
+    @field_validator("amount", "slippage_cost", "realized_pnl", mode="after")
+    @classmethod
+    def _canonical_cents(cls, v: Decimal | None) -> Decimal | None:
+        return canon_cents(v)
+
     @field_validator("metadata", mode="after")
     @classmethod
     def _freeze_metadata(cls, v: Mapping[str, str]) -> Mapping[str, str]:
@@ -147,12 +182,19 @@ class LedgerEvent(BaseModel):
             assert self.qty is not None and self.price is not None
             if self.qty <= 0 or self.price <= 0:
                 raise ValueError("FILL qty and price must be > 0")
+            if not on_grid(self.price, PRICE_Q):
+                raise ValueError(f"FILL price must be on the 1e-8 grid, got {self.price}")
+            if not on_grid(self.qty, QTY8_Q):
+                raise ValueError(f"FILL qty must have at most 8 decimals, got {self.qty}")
             with money_context():
                 expected = q2(self.qty * self.price)
             if self.amount != expected:
                 raise ValueError("FILL amount must equal q2(qty * price)")
             if self.side is FillSide.BUY and self.realized_pnl is not None:
                 raise ValueError("BUY fills carry no realized_pnl")
+        elif self.type is EventType.DEPOSIT:
+            if self.amount <= 0:
+                raise ValueError("DEPOSIT amount must be > 0")
         elif self.type is EventType.FEE:
             if self.order_id is None:
                 raise ValueError("FEE needs the order_id of its FILL")
@@ -174,10 +216,17 @@ class Position(BaseModel):
     high_water_close: Dec | None = None
     stop_level: Dec | None = None
 
+    @field_validator("cost_basis", mode="after")
+    @classmethod
+    def _canonical_cost(cls, v: Decimal) -> Decimal:
+        return canon_cents(v)  # type: ignore[return-value]
+
     @model_validator(mode="after")
     def _check(self) -> Position:
         if self.qty <= 0:
             raise ValueError("a retained position has qty > 0")
+        if not on_grid(self.qty, QTY8_Q):
+            raise ValueError(f"qty must have at most 8 decimals, got {self.qty}")
         if self.cost_basis < 0 or q2(self.cost_basis) != self.cost_basis:
             raise ValueError("cost_basis must be non-negative cents")
         if self.entry_asof is None:
@@ -199,6 +248,11 @@ class PositionSnapshot(BaseModel):
     high_water_close: Dec | None = None
     stop_level: Dec | None = None
 
+    @field_validator("mv", "cost_basis", "unrealized", mode="after")
+    @classmethod
+    def _canonical_cents(cls, v: Decimal) -> Decimal:
+        return canon_cents(v)  # type: ignore[return-value]
+
 
 class SleeveSnapshot(BaseModel):
     """Per-sleeve slice of an equity snapshot."""
@@ -210,6 +264,11 @@ class SleeveSnapshot(BaseModel):
     equity: Dec
     weight: Dec
     positions: list[PositionSnapshot]
+
+    @field_validator("cash", "equity", mode="after")
+    @classmethod
+    def _canonical_cents(cls, v: Decimal) -> Decimal:
+        return canon_cents(v)  # type: ignore[return-value]
 
 
 class PortfolioSnapshot(BaseModel):
@@ -227,3 +286,8 @@ class PortfolioSnapshot(BaseModel):
     sleeves: list[SleeveSnapshot]
     exposures: dict[str, Dec]
     crypto_fraction: Dec
+
+    @field_validator("equity", "cash", "peak_equity", mode="after")
+    @classmethod
+    def _canonical_cents(cls, v: Decimal) -> Decimal:
+        return canon_cents(v)  # type: ignore[return-value]

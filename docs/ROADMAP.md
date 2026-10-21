@@ -29,39 +29,15 @@ Status key: `[ ]` todo · `[~]` in progress · `[x]` done. The PM owns this file
 - [x] [SPEC-006](specs/006-dev-console.md): Streamlit app at `devconsole/` (Overview, Market data, Strategies, Cost sandbox, Quality & reviews). Read-only, synthetic data by default. Run: `uv run streamlit run devconsole/app.py`
 - Grows later: trades after Wave 3, backtests after Wave 4, merges into `dashboard/` in Wave 5
 
-## Wave 3: Engine (next)
+## Wave 3: Engine (done 2026-10-21)
+- [x] 003 T6–T10: sizing + risk checks, stops + kill switch, SimBroker (+ book API), rebalancer, `PortfolioEngine` + `EngineState` · 002 T3 strategy evaluator
+- [x] Tests: 003 T11c/T13, 005 T11/T12, evaluator semantics, kill switch, rebalance, fix-pass regressions
+- [x] Carried-over Wave 2 items resolved (ledger grids/links/atomic transfers, config cent split, data error move)
+- [x] Reviewer (1 blocker fixed: weight-sum rounding) · quality-lead audit PASS-WITH-NOTES, majors F1/F2 fixed
 
-> **Resume here (PM notes, 2026-10-21).** Nothing in Wave 3 has been dispatched yet; the tree is clean at commit `c06cc0c`. Dispatch in this order. Same rules as Wave 2: disjoint file lists, workers lint/test only their own files, no repo-wide `ruff format`.
-> 1. **Stage A (parallel):**
->    - 003 T6 sizing + risk checks [sonnet]
->    - 003 T7 trailing stop + kill switch [sonnet]
->    - 003 T8 SimBroker fills [sonnet]
->    - 002 T3 signal evaluation (`compile_strategy`/`prepare`/`evaluate`) [sonnet]
->    - Junior cleanup [haiku]: move `RevisionQuarantinedError` to `data/errors.py` and re-export it, and fix the SPEC-001 "price-return-like" wording.
-> 2. **Stage B:**
->    - 003 T9 rebalancer [sonnet] (after T6)
->    - 003 T11c sizing tests [haiku] (after T6)
->    - 005 T12 strategy truncation tests [sonnet] (after 002 T3). This also turns the skipped lookahead meta-test on.
-> 3. **Stage C:** 003 T10 `PortfolioEngine` facade + `EngineState` [sonnet] (after T6–T9). It must also take in the carried-over items below: stop overlay persisted in `EngineState`, I4/I7 transfer-pair checks, and execution minors F7, F10–F14.
-> 4. **Stage D:**
->    - 003 T13 scenario tests [haiku]
->    - 005 T11 hand-calc fills, fees, rebalance, caps and stops tests [haiku]
->    - config tests [haiku]
-> 5. **Then:**
->    - reviewer;
->    - mandatory quality-lead audit (money, fills, signals);
->    - fix pass, re-audit, commit;
->    - add trade/signal views to the dev console.
->
-> The 002 T3 brief must say: normalize `required_symbols()` before data lookups; `bars_held` comes from `HeldPosition.entry_ts`; `evaluate` never computes `vol20`/`atr14` (the driver does, in Wave 4).
-
-- [ ] 003 T6–T10 risk checks, stops + kill switch, SimBroker, rebalancer, `PortfolioEngine` · 002 T3 evaluate
-- [ ] Carried over from Wave 2 audits: persist stop overlay in `EngineState`; I4/I7 transfer-pair checks; execution minors F7, F10–F14 (fill grids, duplicate fill ids, FEE linkage, DEPOSIT rules, non-positive close, verify cost, cent exponent); config tests
-- [ ] Move `RevisionQuarantinedError` to `data/errors.py` and re-export; fix SPEC-001 "price-return-like" wording
-- [ ] Strategy evaluator must normalize `required_symbols()` before data lookups
-- [ ] Re-audit residual minors (see docs/reviews/*wave2*): ledger-from-events FILL without FEE, state copy cost, zero-proceeds SELL, qty precision; data head-prepend report-once, multi-process read retry, dir fsync, data F11/F12/F14/F15
-
-## Wave 4: Backtester (planned)
+## Wave 4: Backtester (next, lean mode)
+- [ ] Small carry-overs: zero-qty SELL reason → `BELOW_MIN_SIZE` (`sim/broker.py`); `KillSwitch.reset` guard at module level (strict xfail in `tests/risk/test_killswitch.py`)
+- [ ] Carried from the Wave 3 audit (`docs/reviews/003-wave3-engine-audit.md`): remaining mutant survivors and test gaps G7–G9 (broker sells-first/cash-shrink/expiry, restore with live stops and pending orders, risk repeat-call idempotency and cash reservation). Fold them into Wave 4's property tests (003 T12)
 - [ ] 002 `BarDriver` + `TargetBook` + `trades.py`, metrics, backtest engine, OOS split, walk-forward, ±20% sensitivity, validation gate
 - [ ] Property and invariant tests (003 T12, 002 T9), golden backtests G1–G4 on the synthetic fixtures
 - [ ] The 3 sleeves from STRATEGY.md backtested against buy-and-hold

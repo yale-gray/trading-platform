@@ -55,6 +55,21 @@ Subagents can't spawn subagents, so **the PM dispatches every tier**. Leads retu
 5. **Test and review.** `test-engineer` writes the tests listed in the spec. `reviewer` checks each diff against the spec. `quality-lead` audits anything touching money, fills or signals.
 6. **Accept.** The PM runs `uv run pytest` and `uv run ruff check .`, merges, marks the roadmap item, and adds a line to [docs/process-log.md](docs/process-log.md).
 
+### Lean mode (default from Wave 4, owner decision 2026-10-21)
+The owner works within a 5-hour usage limit. Waves 1–3 used too many agents per wave. From Wave 4 on:
+1. **Bigger tasks, fewer agents.** Use one Sonnet engineer per area per wave, not one per spec task. Group a spec's tasks into that engineer's brief when their files are related. Aim for at most about 6 agents per wave, including tests, audit and fixes.
+2. **One review layer.** Run the quality-lead audit only, and skip the separate reviewer. Ask the audit to also check how the new code fits the next wave.
+3. **Fix pass with no default re-audit.** One engineer applies the audit findings and verifies them. Re-audit only if there was a blocker.
+4. **Short reports.** Workers return:
+   - files changed
+   - test result line
+   - decisions the PM must know
+   - open questions, at most about 15 lines
+
+   No pasted output unless asked.
+5. **Haiku for tests and glue.** Use Sonnet only for core money, engine, strategy and data logic.
+6. **The PM keeps briefs tight.** Point workers at the spec sections instead of restating them.
+
 ### Routing rule (Sonnet vs Haiku)
 Send the task to **`engineer` (Sonnet)** if any of these is true:
 - it touches more than 2 source files

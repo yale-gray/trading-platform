@@ -6,7 +6,14 @@ from collections.abc import Collection, Mapping
 from datetime import date
 from decimal import Decimal
 
-from tradebot.portfolio.ledger import ZERO, Ledger, LedgerError, LedgerState, replay
+from tradebot.portfolio.ledger import (
+    ZERO,
+    Ledger,
+    LedgerError,
+    LedgerState,
+    check_qty_grid,
+    replay,
+)
 from tradebot.portfolio.models import (
     PortfolioSnapshot,
     Position,
@@ -34,15 +41,15 @@ class Portfolio:
 
     @property
     def sleeve_ids(self) -> list[str]:
-        return sorted(self.ledger.state.cash)
+        return sorted(self.ledger.state_view.cash)
 
     def cash(self, sleeve_id: str) -> Decimal:
-        return self.ledger.state.cash[sleeve_id]
+        return self.ledger.state_view.cash[sleeve_id]
 
     def positions(self, sleeve_id: str) -> dict[str, Position]:
         """Positions of a sleeve with the stop overlay applied."""
         out: dict[str, Position] = {}
-        state = self.ledger.state
+        state = self.ledger.state_view
         for sym, p in sorted(state.positions.get(sleeve_id, {}).items()):
             hw: Decimal | None = None
             stop: Decimal | None = None
@@ -63,7 +70,7 @@ class Portfolio:
         stop_level: Decimal | None,
     ) -> None:
         """Record trailing-stop state for an open position (dropped when the position goes flat)."""
-        state = self.ledger.state
+        state = self.ledger.state_view
         if symbol not in state.positions.get(sleeve_id, {}):
             raise LedgerError(f"no open position {symbol} in {sleeve_id}")
         self._overlay[(sleeve_id, symbol)] = (
@@ -93,14 +100,19 @@ class Portfolio:
         killed: bool,
         crypto_symbols: Collection[str],
     ) -> PortfolioSnapshot:
-        state = self.ledger.state
+        state = self.ledger.state_view
         marked: list[tuple[str, Decimal, list[PositionSnapshot]]] = []
         for sid in sorted(state.cash):
             pss: list[PositionSnapshot] = []
             for sym, p in self.positions(sid).items():
                 if sym not in closes:
                     raise LedgerError(f"no close to mark {sym}")
-                mv = q2(p.qty * closes[sym])
+                close = closes[sym]
+                if not isinstance(close, Decimal) or not close.is_finite() or close <= 0:
+                    raise LedgerError(
+                        f"close for held symbol {sym} must be a Decimal > 0, got {close!r}"
+                    )
+                mv = q2(p.qty * close)
                 pss.append(
                     PositionSnapshot(
                         symbol=sym,
@@ -149,18 +161,51 @@ class Portfolio:
             crypto_fraction=frac(sum((v for s, v in by_symbol.items() if s in crypto), ZERO)),
         )
 
-    def verify(self, snap: PortfolioSnapshot) -> None:
-        """Check I1, I2, I3, I5, I6 and I18 against ``snap``; raises ``LedgerError``."""
-        with money_context():
-            self._verify(snap)
+    def verify(
+        self,
+        snap: PortfolioSnapshot,
+        *,
+        state: LedgerState | None = None,
+        closes: Mapping[str, Decimal] | None = None,
+        full_replay: bool | None = None,
+    ) -> None:
+        """Check I1-I7, I18 against ``snap``; raises ``LedgerError``.
 
-    def _verify(self, snap: PortfolioSnapshot) -> None:
-        state: LedgerState = self.ledger.state
-        again = replay(self.ledger.events)
-        if again.cash != state.cash or again.positions != state.positions:
-            raise LedgerError("I5: replay does not reproduce state")
+        * ``state``: an already-folded state (e.g. the one the caller just used
+          to build ``snap``). When given, no replay is done unless
+          ``full_replay=True``; comparisons use this state. Default ``None``
+          keeps the old behaviour: compare against the live fold and replay the
+          whole ledger.
+        * ``closes``: if given, every position's ``mv`` is recomputed as
+          ``q2(qty * close)`` and must match the snapshot (so a self-consistent
+          but mis-marked snapshot is caught), and I6 uses the recomputed values.
+        * ``full_replay``: force (True) or skip (False) the O(events) replay.
+        """
+        with money_context():
+            self._verify(snap, state, closes, full_replay)
+
+    def _verify(
+        self,
+        snap: PortfolioSnapshot,
+        given: LedgerState | None,
+        closes: Mapping[str, Decimal] | None,
+        full_replay: bool | None,
+    ) -> None:
+        state: LedgerState = given if given is not None else self.ledger.state_view
+        do_replay = full_replay if full_replay is not None else given is None
+        if do_replay:
+            again = replay(self.ledger.events)
+            live = self.ledger.state_view
+            if again.cash != live.cash or again.positions != live.positions:
+                raise LedgerError("I5: replay does not reproduce state")
+            if given is not None and (given.cash != live.cash or given.positions != live.positions):
+                raise LedgerError("I5: supplied state does not match the ledger")
+        _check_state_rules(state)
         total_mv = ZERO
+        unreal = ZERO
         for s in snap.sleeves:
+            if s.sleeve_id not in state.cash:
+                raise LedgerError(f"I5: sleeve {s.sleeve_id} unknown to the ledger")
             mv = sum((p.mv for p in s.positions), ZERO)
             total_mv += mv
             if s.cash + mv != s.equity:
@@ -169,13 +214,41 @@ class Portfolio:
                 raise LedgerError(f"I3: sleeve {s.sleeve_id} cash < 0")
             if s.cash != state.cash[s.sleeve_id]:
                 raise LedgerError(f"I5: sleeve {s.sleeve_id} cash != fold")
+            held = state.positions.get(s.sleeve_id, {})
             for p in s.positions:
                 if p.qty <= 0 or p.entry_asof is None:
                     raise LedgerError(f"I18: {s.sleeve_id}/{p.symbol}")
+                fp = held.get(p.symbol)
+                if fp is None or fp.qty != p.qty or fp.cost_basis != p.cost_basis:
+                    raise LedgerError(f"I5: {s.sleeve_id}/{p.symbol} != fold")
+                if closes is not None:
+                    if p.symbol not in closes:
+                        raise LedgerError(f"no close to re-mark {p.symbol}")
+                    if p.mv != q2(p.qty * closes[p.symbol]):
+                        raise LedgerError(f"I1: {s.sleeve_id}/{p.symbol} mv != qty * close")
+                if p.unrealized != p.mv - p.cost_basis:
+                    raise LedgerError(f"I6: {s.sleeve_id}/{p.symbol} unrealized")
+                unreal += p.unrealized
+            if len(held) != len(s.positions):
+                raise LedgerError(f"I5: sleeve {s.sleeve_id} positions != fold")
         if snap.cash + total_mv != snap.equity:
             raise LedgerError("I1: portfolio")
         if sum((s.equity for s in snap.sleeves), ZERO) != snap.equity:
             raise LedgerError("I2")
-        unreal = sum((p.unrealized for s in snap.sleeves for p in s.positions), ZERO)
         if state.deposits + state.realized - state.fees + unreal != snap.equity:
             raise LedgerError("I6")
+
+
+def _check_state_rules(state: LedgerState) -> None:
+    """I4 and I7 on a folded state (O(positions + open transfers))."""
+    for sid, book in state.positions.items():
+        for sym, p in book.items():
+            if p.qty <= 0:
+                raise LedgerError(f"I4: zero/negative qty retained for {sid}/{sym}")
+            check_qty_grid(sym, p.qty, f"I4 {sid}/{sym}")
+    bad = state.unpaired_transfers()
+    if bad:
+        raise LedgerError(f"I7: unpaired transfer legs {bad}")
+    for tid, legs in state.transfers.items():
+        if legs["OUT"][1] != legs["IN"][1]:
+            raise LedgerError(f"I7: transfer {tid} does not net to zero")

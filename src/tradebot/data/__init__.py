@@ -13,6 +13,7 @@ from tradebot.data.errors import (
     DataRevisionError,
     ImmutabilityError,
     ProviderError,
+    RevisionQuarantinedError,
     StaleDataError,
     UnknownSymbolError,
 )
@@ -40,6 +41,7 @@ __all__ = [
     "MarketData",
     "ProviderError",
     "QualityReport",
+    "RevisionQuarantinedError",
     "StaleDataError",
     "StaticUniverse",
     "Symbol",

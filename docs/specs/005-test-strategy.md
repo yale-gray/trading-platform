@@ -216,7 +216,7 @@ def test_cash_plus_positions_equals_equity(bars, plan):
     # ledger prefix stable: running with bars[:k] yields a prefix of the full-run fills
 
 # I7 risk limits (SPEC-003 decides whether checked at order time or every bar; test the stated rule)
-    # after any BUY fill: asset weight <= 25%, total crypto weight <= 30%, using fill-time prices
+    # at BUY acceptance (SPEC-003 I10): asset exposure <= 25%, crypto <= 30% of equity, at the close-d reference price; later drift (incl. slippage) is not force-sold
     # no order may *increase* exposure of an already-breached limit
 
 # I8 kill switch: once drawdown from peak equity >= 20%, no BUY fills until the reset event
@@ -306,7 +306,7 @@ Expected series `[NaN, NaN, 66.6667, 28.5714, 18.1818]`, abs tol 1e-4. Edge case
 **6.6 Others (haiku, workers compute the arithmetic in-test comments).**
 - Metrics: max drawdown for equity `[100, 120, 90, 110]` is (90-120)/120 = **-25.0%**; total return 10%; CAGR from known day counts with P=252 (equity-only) vs P=365 (any run containing crypto), per ADR D6.
 - Rebalance: 100,000 portfolio, 50/20/20/10 targets -> sleeve dollar targets 50,000.00 / 20,000.00 / 20,000.00 / 10,000.00.
-- Cap: a BUY that would take one asset above 25% of equity is shrunk so post-trade weight is exactly <= 25%.
+- Cap: a BUY that would take one asset above 25% of equity is shrunk so its exposure **at order acceptance** (reference close, incl. other sleeves and pending BUYs) is <= 25% (SPEC-003 I10). Slippage and later price moves can push the realised weight slightly above 25% (e.g. 25.003%); that is not force-sold (PM decision 2026-10-21).
 - Trailing stop (ADR D5: close-based, trigger `close <= stop_level`): highest close since entry 120, ATR(14) = 2 -> stop level 120 - 2.5 x 2 = **115**. Stop level never decreases: if the next ATR is 3 and the high-water close is still 120, candidate = 120 - 7.5 = 112.5 < 115, so the level stays 115. A close at **115.00 triggers** a STOP-origin sell that fills at the *next* open; a close at 115.01 does not; 114.99 does.
 - Kill switch: peak equity 100,000; equity 80,000 -> drawdown 0.20 -> triggered (>= 20%); equity 80,001 -> drawdown 0.19999 -> not triggered.
 

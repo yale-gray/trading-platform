@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
+from collections.abc import Mapping
+from decimal import ROUND_FLOOR, Decimal
+from types import MappingProxyType
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, field_serializer, field_validator, model_validator
 
 from tradebot.data.types import AssetClass
+from tradebot.portfolio.money import CENT_Q, money_context
 from tradebot.risk.config import RiskConfig, reject_float
+
+_BPS_CAP = Decimal(10000)  # slip or fee at or above 100% is nonsensical; keeps sell prices > 0
 
 
 class SleeveConfig(BaseModel):
@@ -74,9 +79,9 @@ class CostConfig(BaseModel):
 
     @field_validator("fee_bps", "slip_bps")
     @classmethod
-    def _non_negative_finite(cls, value: Decimal) -> Decimal:
-        if not value.is_finite() or value < 0:
-            raise ValueError(f"bps rate must be finite and >= 0, got {value}")
+    def _bps_in_range(cls, value: Decimal) -> Decimal:
+        if not value.is_finite() or value < 0 or value >= _BPS_CAP:
+            raise ValueError(f"bps rate must be finite, >= 0 and < 10000, got {value}")
         return value
 
 
@@ -88,7 +93,7 @@ class EngineConfig(BaseModel):
     initial_capital: Decimal
     sleeves: tuple[SleeveConfig, ...]
     risk: RiskConfig
-    costs: dict[AssetClass, CostConfig]
+    costs: Mapping[AssetClass, CostConfig]
 
     @field_validator("initial_capital", mode="before")
     @classmethod
@@ -97,10 +102,31 @@ class EngineConfig(BaseModel):
 
     @field_validator("initial_capital")
     @classmethod
-    def _capital_positive(cls, value: Decimal) -> Decimal:
+    def _capital_positive_on_cents(cls, value: Decimal) -> Decimal:
         if not value.is_finite() or value <= 0:
             raise ValueError(f"initial_capital must be > 0, got {value}")
+        try:
+            with money_context():
+                on_grid = value == value.quantize(CENT_Q)
+        except ArithmeticError:
+            on_grid = False
+        if not on_grid:
+            raise ValueError(f"initial_capital must be on the cent grid (0.01), got {value}")
         return value
+
+    @field_validator("costs", mode="after")
+    @classmethod
+    def _costs_read_only(
+        cls, value: Mapping[AssetClass, CostConfig]
+    ) -> Mapping[AssetClass, CostConfig]:
+        # Copy into a read-only view so callers cannot mutate costs after validation.
+        return MappingProxyType(dict(value))
+
+    @field_serializer("costs")
+    def _costs_as_dict(
+        self, value: Mapping[AssetClass, CostConfig]
+    ) -> dict[AssetClass, CostConfig]:
+        return dict(value)
 
     @model_validator(mode="after")
     def _check_engine(self) -> EngineConfig:
@@ -119,6 +145,26 @@ class EngineConfig(BaseModel):
             if cost.asset_class != asset_class:
                 raise ValueError(f"costs[{asset_class}] has asset_class {cost.asset_class}")
         return self
+
+
+def sleeve_deposits(config: EngineConfig) -> dict[str, Decimal]:
+    """Split ``initial_capital`` across sleeves by ``target_weight``, in whole cents.
+
+    Largest remainder: each sleeve gets the floor of its exact cent quota, then the
+    leftover cents go one each to the sleeves with the largest fractional remainders,
+    ties broken by ``sleeve_id`` ascending. The deposits sum exactly to
+    ``initial_capital``. Returned in ``config.sleeves`` order.
+    """
+    with money_context():
+        capital_cents = int(config.initial_capital * 100)  # exact: validated on the cent grid
+        quotas = {s.sleeve_id: Decimal(capital_cents) * s.target_weight for s in config.sleeves}
+        floors = {sid: int(q.to_integral_value(rounding=ROUND_FLOOR)) for sid, q in quotas.items()}
+        leftover = capital_cents - sum(floors.values())
+        by_remainder = sorted(quotas, key=lambda sid: (-(quotas[sid] - floors[sid]), sid))
+        cents = dict(floors)
+        for sid in by_remainder[:leftover]:
+            cents[sid] += 1
+        return {s.sleeve_id: Decimal(cents[s.sleeve_id]) * CENT_Q for s in config.sleeves}
 
 
 def default_config() -> EngineConfig:

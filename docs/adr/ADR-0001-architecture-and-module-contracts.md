@@ -199,6 +199,16 @@ Tasks within a wave can run in parallel when their file lists don't overlap.
 3. In parallel: 003 T11a money tests, 002 T7a indicator tests, 005 T4 fixture-manifest test.
 4. Reviewer on every task. Quality-lead audit on 003 T1 (money is mandatory) and 005 T3 (fixtures are mandatory).
 
+## 6. Addendum: Wave 3 decisions (2026-10-21)
+
+**A7. Hold-while on unknown data.** A rules strategy with no explicit `exit` exits when its entry condition is not *confirmed* true. NaN/unknown counts as "not confirmed". This moves toward cash on data gaps, which is the safe direction, at the cost of an occasional extra round trip. An explicit `exit` that evaluates to unknown holds. SPEC-002 §2 is read accordingly.
+
+**A8. Missing volatility on held symbols.** A full exit is never blocked. A partial **trim** of a vol-scaled holding with no `vol20` is rejected (`NO_VOL_DATA`) until vol data exists, per SPEC-003 §5–6.
+
+**A9. Risk caps are measured at order acceptance** (SPEC-003 I10). Slippage and later drift can leave a realised weight slightly above 25%/30%, and that is not force-sold.
+
+**A10. Lean process from Wave 4** (owner decision): see CLAUDE.md "Lean mode".
+
 ## Consequences
 - **One loop (`BarDriver`) and one engine** mean a backtest result and a paper result for the same bars must match exactly. SPEC-005 can test that directly.
 - **Synthetic fixtures** keep the public repo clean and the goldens stable, but CI never sees real market data. Real-data sanity checks are a manual, local step before any strategy passes the gate.

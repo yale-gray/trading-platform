@@ -25,8 +25,10 @@ from tradebot.data.errors import (
     DataQualityError,
     DataRevisionError,
     ProviderError,
+    RevisionQuarantinedError,
     StaleDataError,
     UnknownSymbolError,
+    quarantine_warning,
 )
 from tradebot.data.provider import DataProvider
 from tradebot.data.providers.ccxt_provider import CcxtProvider
@@ -44,24 +46,6 @@ DEFAULT_HISTORY_START: dict[AssetClass, date] = {
     AssetClass.EQUITY: date(2005, 1, 1),
     AssetClass.CRYPTO: date(2015, 1, 1),
 }
-
-
-class RevisionQuarantinedError(DataRevisionError):
-    """A symbol's tail fetch was quarantined as a revision; only ``rebase`` clears it (ADR D2).
-
-    The Wave 5 runner maps this to ``data_unavailable`` for ``symbol``. ``since`` is the
-    UTC date on which this ``MarketData`` first saw the revision.
-    """
-
-    def __init__(self, symbol: str, since: date) -> None:
-        self.symbol = symbol
-        self.since = since
-        super().__init__(f"{symbol}: {quarantine_warning(since)}")
-
-
-def quarantine_warning(since: date) -> str:
-    """The warning text carried by a ``QualityReport`` for a wedged symbol."""
-    return f"revision_quarantined: needs rebase since {since.isoformat()}"
 
 
 STATUS_QUARANTINED = "revision_quarantined"

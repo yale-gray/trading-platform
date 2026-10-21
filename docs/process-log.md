@@ -32,6 +32,7 @@ One row per dispatched task. We use this to judge whether the Opus PM → Sonnet
 | 2026-10-21 | SPEC-006 dev console | platform-lead | Sonnet | done | 0 | no | Spec in ~3 min; 14 tasks with a clean dependency graph |
 | 2026-10-21 | 006 T1–T14 | engineer ×4 / junior+test ×12 | Sonnet / Haiku | done | 1 | no | 0 Haiku escalations; workers caught an interface mismatch (period vs n) and a stale roadmap |
 | 2026-10-21 | 006 review | reviewer | Sonnet | done | 1 | n/a | REQUEST-CHANGES: chart RSI/ATR/EMA off by up to ~5 points (short warmup) and a wall-clock read; fixed and re-reviewed |
+| 2026-10-21 | Wave 3 (≈17 build/test tasks + reviewer + audit + 2 fixers) | mixed | mostly Sonnet | done | 1 | no | Most expensive wave so far; owner hit ~50% of a 5-hour limit. Switched to lean mode for Wave 4 |
 
 ## Retrospective notes
 ### Lead research round (2026-10-20)
@@ -55,5 +56,10 @@ One row per dispatched task. We use this to judge whether the Opus PM → Sonnet
 - **Reviewer earned its keep on a "non-critical" UI**: the indicator charts would have shown RSI values up to ~5 points different from what the strategy computes — the kind of silent mismatch that erodes trust in a dashboard. Measured, not eyeballed.
 - **Looking at the running app early helped**: the PM preview caught the late-starting SMA line before review did.
 - **Seam bugs again** (period vs n between two helper modules written in parallel). Exact signatures in the spec prevent most, but cross-module data shapes need the same precision.
+
+### Wave 3 (2026-10-21)
+- **Cost was the lesson.** Many small Sonnet tasks + two review layers + a 30-minute mutation audit burned the owner's usage limit. Lean mode (≤6 agents/wave, audit only, short reports) is now the default.
+- **The mutation audit was the most informative step**: it found the evaluator had zero semantic tests (24/24 mutants survived) despite passing causality tests. Worth keeping, but scoped.
+- **Reviewer still caught a real crash** (weight-sum rounding with 6+ symbols) that every hand-calc and scenario test missed, because none used ≥6 equal weights.
 
 <!-- After each phase: what worked, what didn't, routing-rule changes -->

@@ -35,14 +35,15 @@ Status key: `[ ]` todo · `[~]` in progress · `[x]` done. The PM owns this file
 - [x] Carried-over Wave 2 items resolved (ledger grids/links/atomic transfers, config cent split, data error move)
 - [x] Reviewer (1 blocker fixed: weight-sum rounding) · quality-lead audit PASS-WITH-NOTES, majors F1/F2 fixed
 
-## Wave 4: Backtester (next, lean mode)
-- [ ] Small carry-overs: zero-qty SELL reason → `BELOW_MIN_SIZE` (`sim/broker.py`); `KillSwitch.reset` guard at module level (strict xfail in `tests/risk/test_killswitch.py`)
-- [ ] Carried from the Wave 3 audit (`docs/reviews/003-wave3-engine-audit.md`): remaining mutant survivors and test gaps G7–G9 (broker sells-first/cash-shrink/expiry, restore with live stops and pending orders, risk repeat-call idempotency and cash reservation). Fold them into Wave 4's property tests (003 T12)
-- [ ] 002 `BarDriver` + `TargetBook` + `trades.py`, metrics, backtest engine, OOS split, walk-forward, ±20% sensitivity, validation gate
-- [ ] Property and invariant tests (003 T12, 002 T9), golden backtests G1–G4 on the synthetic fixtures
-- [ ] The 3 sleeves from STRATEGY.md backtested against buy-and-hold
+## Wave 4: Backtester (done 2026-10-21, lean mode)
+- [x] 002: `BarDriver` + `TargetBook`, trades/equity/exposure from the ledger, metrics, `run_backtest`/`run_with_benchmark` (SPY, BTC, monthly-rebalanced blend), warmup enforced
+- [x] 002: validation: 70/30 OOS (read once), walk-forward inside IS, ±20% sensitivity, `evaluate_gate`; memorizer rejected, positive control passes
+- [x] Engine property tests with an independent oracle (003 T12, 005 T13–T14); goldens G1–G4 signed off by quality-lead; backtest prefix invariance
+- [x] Dev console Backtests page · CI split (fast PR job ~60 s; slow/golden on main + nightly)
+- [x] Audit PASS-WITH-NOTES; fixes applied (window pins, gate boundaries, production walk-forward defaults)
+- Result on synthetic fixtures: all three sleeves **fail** the gate (hold). Expected on practice data; real-data runs come with Wave 5
 
-## Wave 5: Paper trading + dashboard (planned)
+## Wave 5: Paper trading + dashboard (next, lean mode)
 - [ ] SQLite persistence, restart-safe APScheduler runner, engine checkpoints (004)
 - [ ] FastAPI endpoints, unified `tradebot` CLI
 - [ ] Streamlit dashboard (dev console pages merge in): portfolios, equity vs benchmark, positions, trades, perf cards

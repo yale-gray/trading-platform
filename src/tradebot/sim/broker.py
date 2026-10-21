@@ -296,7 +296,12 @@ class SimBroker:
             held = pos.qty if pos is not None else Decimal(0)
             qty = min(qty, held)  # defensive; submit_orders already checks holdings
         if qty <= 0:
-            return transition(order, OrderStatus.REJECTED, reason=OrderReason.INSUFFICIENT_CASH), []
+            zero_reason = (
+                OrderReason.INSUFFICIENT_CASH
+                if order.side is Side.BUY
+                else OrderReason.BELOW_MIN_SIZE
+            )
+            return transition(order, OrderStatus.REJECTED, reason=zero_reason), []
         notional = costs.notional(qty, price)
         fee = costs.fee(notional, cost.fee_bps)
         try:

@@ -1,0 +1,153 @@
+{
+  "benchmark": {
+    "SPY": {
+      "cagr": 0.06137059425197022,
+      "exposure_avg": 0.9970660660426219,
+      "max_drawdown": -0.39575823262477106,
+      "sharpe": 0.4388477781740907,
+      "sortino": 0.6298070549948305,
+      "total_return": 0.42921010000000015,
+      "trade_count": 0,
+      "win_rate": null
+    }
+  },
+  "config_hash": "a67141f77cc12dda41ab038bfdf2e05b7e6f086e0c700ce46f349ff2f623fbcb",
+  "data_fingerprint": "82b8abd3ba7302ff23cd64fd6c8dd52924ff8a2f18a277122d458423a113c5d2",
+  "end": "2024-12-31",
+  "fill_count": 305,
+  "fills_sha256": "acdb5b4b6f84784dab82992a9a5fb9d972ee52b25d92ba41af38f0d357c2826d",
+  "final_cash": "50070.97",
+  "final_equity": "98906.51",
+  "final_qty": {
+    "QQQ": "202"
+  },
+  "first_fills": [
+    {
+      "fee": "0.00",
+      "fill_ts": "2019-01-09",
+      "price": "203.30200020",
+      "qty": "246",
+      "seq": "2",
+      "side": "BUY",
+      "signal_ts": "2019-01-08",
+      "sleeve": "mean_reversion",
+      "symbol": "QQQ"
+    },
+    {
+      "fee": "0.00",
+      "fill_ts": "2019-01-11",
+      "price": "197.78465820",
+      "qty": "26",
+      "seq": "3",
+      "side": "SELL",
+      "signal_ts": "2019-01-10",
+      "sleeve": "mean_reversion",
+      "symbol": "QQQ"
+    },
+    {
+      "fee": "0.00",
+      "fill_ts": "2019-01-11",
+      "price": "304.95119940",
+      "qty": "163",
+      "seq": "4",
+      "side": "BUY",
+      "signal_ts": "2019-01-10",
+      "sleeve": "mean_reversion",
+      "symbol": "SPY"
+    },
+    {
+      "fee": "0.00",
+      "fill_ts": "2019-01-14",
+      "price": "302.54519700",
+      "qty": "16",
+      "seq": "5",
+      "side": "BUY",
+      "signal_ts": "2019-01-11",
+      "sleeve": "mean_reversion",
+      "symbol": "SPY"
+    },
+    {
+      "fee": "0.00",
+      "fill_ts": "2019-01-17",
+      "price": "194.82643805",
+      "qty": "220",
+      "seq": "6",
+      "side": "SELL",
+      "signal_ts": "2019-01-16",
+      "sleeve": "mean_reversion",
+      "symbol": "QQQ"
+    }
+  ],
+  "id": "G1",
+  "last_fills": [
+    {
+      "fee": "0.00",
+      "fill_ts": "2024-11-06",
+      "price": "234.99183720",
+      "qty": "214",
+      "seq": "376",
+      "side": "BUY",
+      "signal_ts": "2024-11-05",
+      "sleeve": "mean_reversion",
+      "symbol": "QQQ"
+    },
+    {
+      "fee": "0.00",
+      "fill_ts": "2024-11-08",
+      "price": "227.12370510",
+      "qty": "4",
+      "seq": "377",
+      "side": "BUY",
+      "signal_ts": "2024-11-07",
+      "sleeve": "mean_reversion",
+      "symbol": "QQQ"
+    },
+    {
+      "fee": "0.00",
+      "fill_ts": "2024-11-12",
+      "price": "223.44926880",
+      "qty": "3",
+      "seq": "378",
+      "side": "BUY",
+      "signal_ts": "2024-11-11",
+      "sleeve": "mean_reversion",
+      "symbol": "QQQ"
+    },
+    {
+      "fee": "0.00",
+      "fill_ts": "2024-11-14",
+      "price": "226.44112280",
+      "qty": "221",
+      "seq": "379",
+      "side": "SELL",
+      "signal_ts": "2024-11-13",
+      "sleeve": "mean_reversion",
+      "symbol": "QQQ"
+    },
+    {
+      "fee": "0.00",
+      "fill_ts": "2024-12-31",
+      "price": "243.51459645",
+      "qty": "202",
+      "seq": "381",
+      "side": "BUY",
+      "signal_ts": "2024-12-30",
+      "sleeve": "mean_reversion",
+      "symbol": "QQQ"
+    }
+  ],
+  "ledger_sha256": "0813ba1669a30592296251d332cd87c64a760094106247bb198efaea7f864b3c",
+  "metrics": {
+    "cagr": -0.0018320957214361666,
+    "exposure_avg": 0.13181257732026602,
+    "max_drawdown": -0.1157259518926933,
+    "sharpe": -0.001127448024948693,
+    "sortino": -0.0014722450453376187,
+    "total_return": -0.01093490000000008,
+    "trade_count": 96,
+    "win_rate": 0.6145833333333334
+  },
+  "n_signals": 1510,
+  "schema_version": 1,
+  "start": "2019-01-02"
+}

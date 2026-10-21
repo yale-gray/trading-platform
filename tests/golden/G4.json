@@ -1,0 +1,177 @@
+{
+  "benchmark": {
+    "BTC/USD": {
+      "cagr": 0.21832416436989943,
+      "exposure_avg": 0.9995435874030123,
+      "max_drawdown": -0.8000527385003584,
+      "sharpe": 0.6280593382481792,
+      "sortino": 0.9295868492606069,
+      "total_return": 2.2675703000000005,
+      "trade_count": 0,
+      "win_rate": null
+    },
+    "SPY": {
+      "cagr": 0.06137059425197022,
+      "exposure_avg": 0.9972724935698858,
+      "max_drawdown": -0.39575823262477106,
+      "sharpe": 0.4384052724196356,
+      "sortino": 0.6291819361757852,
+      "total_return": 0.42921010000000015,
+      "trade_count": 0,
+      "win_rate": null
+    },
+    "blend": {
+      "cagr": 0.12100733026818489,
+      "exposure_avg": 0.8976080753228102,
+      "max_drawdown": -0.40911041225009304,
+      "sharpe": 0.6810196079176764,
+      "sortino": 0.9945706052308634,
+      "total_return": 0.9835674999999999,
+      "trade_count": 0,
+      "win_rate": null
+    }
+  },
+  "config_hash": "14a02c3588fc8090247b31a0abfac80da1809a4bc86ae346b0ba6838df3c3838",
+  "data_fingerprint": "0aa2e38dafedb86c6accf741d84810907f672be4db23026a999ef7626129ec78",
+  "end": "2024-12-31",
+  "fill_count": 1893,
+  "fills_sha256": "e21a828521c89a50cbdf64a4571b8ef88187471de5dcc97dc638a43d310bce44",
+  "final_cash": "70858.63",
+  "final_equity": "122919.05",
+  "final_qty": {
+    "BTC/USD": "0.11128946",
+    "EEM": "14",
+    "QQQ": "50",
+    "SOL/USD": "397.16828682",
+    "XLU": "271"
+  },
+  "first_fills": [
+    {
+      "fee": "0.00",
+      "fill_ts": "2019-01-03",
+      "price": "97.09102125",
+      "qty": "189",
+      "seq": "5",
+      "side": "BUY",
+      "signal_ts": "2019-01-02",
+      "sleeve": "core_momentum",
+      "symbol": "EFA"
+    },
+    {
+      "fee": "0.00",
+      "fill_ts": "2019-01-03",
+      "price": "188.56323450",
+      "qty": "81",
+      "seq": "6",
+      "side": "BUY",
+      "signal_ts": "2019-01-02",
+      "sleeve": "core_momentum",
+      "symbol": "IWM"
+    },
+    {
+      "fee": "0.00",
+      "fill_ts": "2019-01-03",
+      "price": "64.01369085",
+      "qty": "255",
+      "seq": "7",
+      "side": "BUY",
+      "signal_ts": "2019-01-02",
+      "sleeve": "core_momentum",
+      "symbol": "XLB"
+    },
+    {
+      "fee": "8.11",
+      "fill_ts": "2019-01-03",
+      "price": "27918.32443400",
+      "qty": "0.29051518",
+      "seq": "8",
+      "side": "BUY",
+      "signal_ts": "2019-01-02",
+      "sleeve": "crypto_trend",
+      "symbol": "BTC/USD"
+    },
+    {
+      "fee": "5.22",
+      "fill_ts": "2019-01-03",
+      "price": "1309.35394590",
+      "qty": "3.98447700",
+      "seq": "10",
+      "side": "BUY",
+      "signal_ts": "2019-01-02",
+      "sleeve": "crypto_trend",
+      "symbol": "ETH/USD"
+    }
+  ],
+  "id": "G4",
+  "last_fills": [
+    {
+      "fee": "2.04",
+      "fill_ts": "2024-12-26",
+      "price": "92090.83743860",
+      "qty": "0.02216377",
+      "seq": "3796",
+      "side": "BUY",
+      "signal_ts": "2024-12-25",
+      "sleeve": "crypto_trend",
+      "symbol": "BTC/USD"
+    },
+    {
+      "fee": "6.15",
+      "fill_ts": "2024-12-26",
+      "price": "15.16965450",
+      "qty": "405.25320352",
+      "seq": "3798",
+      "side": "BUY",
+      "signal_ts": "2024-12-25",
+      "sleeve": "crypto_trend",
+      "symbol": "SOL/USD"
+    },
+    {
+      "fee": "0.13",
+      "fill_ts": "2024-12-29",
+      "price": "15.51017430",
+      "qty": "8.08491670",
+      "seq": "3800",
+      "side": "SELL",
+      "signal_ts": "2024-12-28",
+      "sleeve": "crypto_trend",
+      "symbol": "SOL/USD"
+    },
+    {
+      "fee": "0.18",
+      "fill_ts": "2024-12-30",
+      "price": "92627.21498030",
+      "qty": "0.00195239",
+      "seq": "3802",
+      "side": "BUY",
+      "signal_ts": "2024-12-29",
+      "sleeve": "crypto_trend",
+      "symbol": "BTC/USD"
+    },
+    {
+      "fee": "0.00",
+      "fill_ts": "2024-12-31",
+      "price": "243.51459645",
+      "qty": "50",
+      "seq": "3804",
+      "side": "BUY",
+      "signal_ts": "2024-12-30",
+      "sleeve": "mean_reversion",
+      "symbol": "QQQ"
+    }
+  ],
+  "ledger_sha256": "2151a81dfac533d7d2152f2b50f71b1dbf2804e84af38e4e52b80f613370cad4",
+  "metrics": {
+    "cagr": 0.03501528394765585,
+    "exposure_avg": 0.44491993035943594,
+    "max_drawdown": -0.17796930695751134,
+    "sharpe": 0.3971888282764599,
+    "sortino": 0.5708100919578856,
+    "total_return": 0.22919050000000007,
+    "trade_count": 306,
+    "win_rate": 0.42483660130718953
+  },
+  "n_signals": 3773,
+  "schema_version": 1,
+  "start": "2019-01-02"
+}

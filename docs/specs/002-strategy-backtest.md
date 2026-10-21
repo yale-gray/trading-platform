@@ -254,7 +254,7 @@ Inputs: equity series E_0..E_N (floats converted from the ledger's Decimal at th
 
 Zero-variance guards: Sharpe/Sortino are NaN (not inf) when the denominator is 0. A *round trip* = a symbol's position going 0 -> >0 -> back to 0 within a sleeve; scale-in/trim during it belongs to the same trade; pnl is net of fees and slippage (computed by `trades.py` from the ledger). Positions still open at the end are excluded from `trade_count`/`win_rate` and listed under `open_positions_at_end`. Sharpe approach per Sharpe (1994) "The Sharpe Ratio"; Sortino & Price (1994) for the downside deviation.
 
-**Report** (`BacktestResult.metrics`, `benchmark_metrics` per benchmark, and `deltas`): every report includes the buy-and-hold benchmark over the identical window: `SPY` for equity, `BTC/USD` for crypto; for multi-class portfolios both, plus a static blend (sleeve class weights, cash included) so one portfolio-level comparison exists.
+**Report** (`BacktestResult.metrics`, `benchmark_metrics` per benchmark, and `deltas`): every report includes the buy-and-hold benchmark over the identical window: `SPY` for equity, `BTC/USD` for crypto; for multi-class portfolios both, plus a **monthly-rebalanced** blend (sleeve class weights, cash included, run through the same engine and costs; PM decision 2026-10-21, ADR A11) so one portfolio-level comparison exists.
 
 ### 8. Validation (maps to STRATEGY.md §7)
 
@@ -593,7 +593,7 @@ Resolved by ADR-0001 D10 (recorded here, questions removed):
 - **Data-history gate:** measured on the **strategy's calendar** (the union of its universe), not per symbol; SOL's shorter history is allowed and the NaN-means-ineligible rule handles it.
 - **Gate thresholds:** walk-forward >= 60% of windows with Sharpe > 0 and drawdown <= benchmark; sensitivity collapse = Sharpe < 0.5x base, or drawdown > 1.5x base, or the return flips sign. Defaults stay PM-tunable through `GateConfig`.
 - **Risk-free rate:** 0%.
-- **Mixed-portfolio report:** SPY, BTC and a static blend.
+- **Mixed-portfolio report:** SPY, BTC and a monthly-rebalanced blend (ADR A11).
 - **ATR-stop semantics and cooldown:** close-based `close <= stop_level`, exit at next open (D5); re-entry lock until the strategy has gone flat once (D3).
 - **Adjusted prices:** fully adjusted OHLC (D2), dividends included, forward chain-linking accepted.
 

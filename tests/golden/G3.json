@@ -1,0 +1,154 @@
+{
+  "benchmark": {
+    "BTC/USD": {
+      "cagr": 0.21832416436989943,
+      "exposure_avg": 0.9995435874030123,
+      "max_drawdown": -0.8000527385003584,
+      "sharpe": 0.6280593382481792,
+      "sortino": 0.9295868492606069,
+      "total_return": 2.2675703000000005,
+      "trade_count": 0,
+      "win_rate": null
+    }
+  },
+  "config_hash": "f15f36253a2e6b9063540cdb1ccd8ae52753352d8ec10c71e6edcbcf399276aa",
+  "data_fingerprint": "fd4048eb9a4af43a71ad8419d8363c285a6ab8e7505d3de0d8ffe924453321f0",
+  "end": "2024-12-31",
+  "fill_count": 1305,
+  "fills_sha256": "c475b1e3f034ac23ddf49118b5d7ae5c3cb6ebf966df3b695fd27db0ac2516c2",
+  "final_cash": "67204.31",
+  "final_equity": "200680.99",
+  "final_qty": {
+    "BTC/USD": "0.92512529",
+    "SOL/USD": "3301.57269443"
+  },
+  "first_fills": [
+    {
+      "fee": "40.55",
+      "fill_ts": "2019-01-03",
+      "price": "27918.32443400",
+      "qty": "1.45257591",
+      "seq": "2",
+      "side": "BUY",
+      "signal_ts": "2019-01-02",
+      "sleeve": "crypto_trend",
+      "symbol": "BTC/USD"
+    },
+    {
+      "fee": "26.09",
+      "fill_ts": "2019-01-03",
+      "price": "1309.35394590",
+      "qty": "19.92238503",
+      "seq": "4",
+      "side": "BUY",
+      "signal_ts": "2019-01-02",
+      "sleeve": "crypto_trend",
+      "symbol": "ETH/USD"
+    },
+    {
+      "fee": "0.60",
+      "fill_ts": "2019-01-04",
+      "price": "28047.08464020",
+      "qty": "0.02145945",
+      "seq": "6",
+      "side": "SELL",
+      "signal_ts": "2019-01-03",
+      "sleeve": "crypto_trend",
+      "symbol": "BTC/USD"
+    },
+    {
+      "fee": "0.60",
+      "fill_ts": "2019-01-04",
+      "price": "1246.54910380",
+      "qty": "0.48332110",
+      "seq": "8",
+      "side": "BUY",
+      "signal_ts": "2019-01-03",
+      "sleeve": "crypto_trend",
+      "symbol": "ETH/USD"
+    },
+    {
+      "fee": "0.77",
+      "fill_ts": "2019-01-05",
+      "price": "27348.56236170",
+      "qty": "0.02804124",
+      "seq": "10",
+      "side": "SELL",
+      "signal_ts": "2019-01-04",
+      "sleeve": "crypto_trend",
+      "symbol": "BTC/USD"
+    }
+  ],
+  "id": "G3",
+  "last_fills": [
+    {
+      "fee": "1.76",
+      "fill_ts": "2024-12-24",
+      "price": "93313.34492480",
+      "qty": "0.01886139",
+      "seq": "2727",
+      "side": "BUY",
+      "signal_ts": "2024-12-23",
+      "sleeve": "crypto_trend",
+      "symbol": "BTC/USD"
+    },
+    {
+      "fee": "16.97",
+      "fill_ts": "2024-12-26",
+      "price": "92090.83743860",
+      "qty": "0.18424222",
+      "seq": "2729",
+      "side": "BUY",
+      "signal_ts": "2024-12-25",
+      "sleeve": "crypto_trend",
+      "symbol": "BTC/USD"
+    },
+    {
+      "fee": "51.10",
+      "fill_ts": "2024-12-26",
+      "price": "15.16965450",
+      "qty": "3368.78099856",
+      "seq": "2731",
+      "side": "BUY",
+      "signal_ts": "2024-12-25",
+      "sleeve": "crypto_trend",
+      "symbol": "SOL/USD"
+    },
+    {
+      "fee": "1.04",
+      "fill_ts": "2024-12-29",
+      "price": "15.51017430",
+      "qty": "67.20830413",
+      "seq": "2733",
+      "side": "SELL",
+      "signal_ts": "2024-12-28",
+      "sleeve": "crypto_trend",
+      "symbol": "SOL/USD"
+    },
+    {
+      "fee": "1.50",
+      "fill_ts": "2024-12-30",
+      "price": "92627.21498030",
+      "qty": "0.01623020",
+      "seq": "2735",
+      "side": "BUY",
+      "signal_ts": "2024-12-29",
+      "sleeve": "crypto_trend",
+      "symbol": "BTC/USD"
+    }
+  ],
+  "ledger_sha256": "e10e46b927dc53fe2d9e8e904f47ad28035e21edab1f3133811ebf73af80beda",
+  "metrics": {
+    "cagr": 0.12318744038142082,
+    "exposure_avg": 0.3058723518374432,
+    "max_drawdown": -0.3477364279374977,
+    "sharpe": 0.5411882756402892,
+    "sortino": 0.8267938565215557,
+    "total_return": 1.0068099,
+    "trade_count": 151,
+    "win_rate": 0.2781456953642384
+  },
+  "n_signals": 2191,
+  "schema_version": 1,
+  "start": "2019-01-02"
+}

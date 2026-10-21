@@ -33,6 +33,7 @@ One row per dispatched task. We use this to judge whether the Opus PM → Sonnet
 | 2026-10-21 | 006 T1–T14 | engineer ×4 / junior+test ×12 | Sonnet / Haiku | done | 1 | no | 0 Haiku escalations; workers caught an interface mismatch (period vs n) and a stale roadmap |
 | 2026-10-21 | 006 review | reviewer | Sonnet | done | 1 | n/a | REQUEST-CHANGES: chart RSI/ATR/EMA off by up to ~5 points (short warmup) and a wall-clock read; fixed and re-reviewed |
 | 2026-10-21 | Wave 3 (≈17 build/test tasks + reviewer + audit + 2 fixers) | mixed | mostly Sonnet | done | 1 | no | Most expensive wave so far; owner hit ~50% of a 5-hour limit. Switched to lean mode for Wave 4 |
+| 2026-10-21 | Wave 4 (lean: 4 build agents + 1 audit + 1 fix) | Sonnet ×4, Haiku ×1 | mixed | done | 0 | no | 6 agents total vs ~20 in Wave 3. Audit found no blockers; gates/goldens/CI split delivered |
 
 ## Retrospective notes
 ### Lead research round (2026-10-20)
@@ -61,5 +62,10 @@ One row per dispatched task. We use this to judge whether the Opus PM → Sonnet
 - **Cost was the lesson.** Many small Sonnet tasks + two review layers + a 30-minute mutation audit burned the owner's usage limit. Lean mode (≤6 agents/wave, audit only, short reports) is now the default.
 - **The mutation audit was the most informative step**: it found the evaluator had zero semantic tests (24/24 mutants survived) despite passing causality tests. Worth keeping, but scoped.
 - **Reviewer still caught a real crash** (weight-sum rounding with 6+ symbols) that every hand-calc and scenario test missed, because none used ≥6 equal weights.
+
+### Wave 4 (2026-10-21, first lean wave)
+- **Lean mode worked**: 6 agents (vs ~20 in Wave 3) for a comparable amount of code, and quality held: the audit found no blockers, hand-verified 7 fills and both benchmarks, and signed off the goldens.
+- **Bigger briefs need tighter scopes.** One agent ran `ruff format` across all of `src/` despite instructions (harmless this time, verified by diff).
+- **Usage limit interrupted an agent mid-task**; resuming it via message (not restarting) preserved its work.
 
 <!-- After each phase: what worked, what didn't, routing-rule changes -->

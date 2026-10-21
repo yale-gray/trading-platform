@@ -76,6 +76,8 @@ class KillSwitch:
 
     def reset(self, operator: str, note: str, asof: date) -> None:
         """Manual reset (CLI only): clear the flag, peak = last observed equity."""
+        if not self.killed:
+            raise ValueError("kill switch not tripped; nothing to reset")
         with money_context():
             self.peak_equity = self.last_equity.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)
         self.killed = False

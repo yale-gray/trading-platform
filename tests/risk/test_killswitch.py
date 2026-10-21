@@ -110,14 +110,6 @@ def test_default_threshold_does_not_trip_at_ten_percent() -> None:
     assert ks.observe(D("90000.00"), D1).killed is False
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "KillSwitch.reset does not check that the switch is tripped; the 'not tripped' guard "
-        "lives in PortfolioEngine.reset_kill_switch (portfolio/engine.py:601). Spec-level "
-        "guard is untested at this layer. Listed for PM decision."
-    ),
-)
 def test_reset_requires_tripped() -> None:
     ks = KillSwitch(CAP)
     with pytest.raises(ValueError, match="not tripped"):

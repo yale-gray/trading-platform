@@ -1,0 +1,155 @@
+{
+  "benchmark": {
+    "SPY": {
+      "cagr": 0.06137059425197022,
+      "exposure_avg": 0.9970660660426219,
+      "max_drawdown": -0.39575823262477106,
+      "sharpe": 0.4388477781740907,
+      "sortino": 0.6298070549948305,
+      "total_return": 0.42921010000000015,
+      "trade_count": 0,
+      "win_rate": null
+    }
+  },
+  "config_hash": "9fdc446ead195ece04bb4ee378fe1eadb02a006db292935a9eba47ec1a85c6e8",
+  "data_fingerprint": "efb61cc4242a44702f4f50e36b4d712738b9a0db370cfa1c151be5da21282f85",
+  "end": "2024-12-31",
+  "fill_count": 204,
+  "fills_sha256": "a180cd8181a7496e0a205e4d38f996c750df7a2311b6f54b20f751de6346055f",
+  "final_cash": "33366.87",
+  "final_equity": "97817.24",
+  "final_qty": {
+    "EEM": "429",
+    "TLT": "198",
+    "XLU": "304"
+  },
+  "first_fills": [
+    {
+      "fee": "0.00",
+      "fill_ts": "2019-01-03",
+      "price": "97.09102125",
+      "qty": "378",
+      "seq": "2",
+      "side": "BUY",
+      "signal_ts": "2019-01-02",
+      "sleeve": "core_momentum",
+      "symbol": "EFA"
+    },
+    {
+      "fee": "0.00",
+      "fill_ts": "2019-01-03",
+      "price": "188.56323450",
+      "qty": "162",
+      "seq": "3",
+      "side": "BUY",
+      "signal_ts": "2019-01-02",
+      "sleeve": "core_momentum",
+      "symbol": "IWM"
+    },
+    {
+      "fee": "0.00",
+      "fill_ts": "2019-01-03",
+      "price": "64.01369085",
+      "qty": "511",
+      "seq": "4",
+      "side": "BUY",
+      "signal_ts": "2019-01-02",
+      "sleeve": "core_momentum",
+      "symbol": "XLB"
+    },
+    {
+      "fee": "0.00",
+      "fill_ts": "2019-02-04",
+      "price": "94.98798225",
+      "qty": "378",
+      "seq": "6",
+      "side": "SELL",
+      "signal_ts": "2019-02-01",
+      "sleeve": "core_momentum",
+      "symbol": "EFA"
+    },
+    {
+      "fee": "0.00",
+      "fill_ts": "2019-03-04",
+      "price": "181.55767575",
+      "qty": "11",
+      "seq": "8",
+      "side": "SELL",
+      "signal_ts": "2019-03-01",
+      "sleeve": "core_momentum",
+      "symbol": "IWM"
+    }
+  ],
+  "id": "G2",
+  "last_fills": [
+    {
+      "fee": "0.00",
+      "fill_ts": "2024-11-04",
+      "price": "141.43788360",
+      "qty": "183",
+      "seq": "271",
+      "side": "BUY",
+      "signal_ts": "2024-11-01",
+      "sleeve": "core_momentum",
+      "symbol": "EFA"
+    },
+    {
+      "fee": "0.00",
+      "fill_ts": "2024-12-03",
+      "price": "141.15558690",
+      "qty": "183",
+      "seq": "273",
+      "side": "SELL",
+      "signal_ts": "2024-12-02",
+      "sleeve": "core_momentum",
+      "symbol": "EFA"
+    },
+    {
+      "fee": "0.00",
+      "fill_ts": "2024-12-03",
+      "price": "192.28960710",
+      "qty": "39",
+      "seq": "274",
+      "side": "SELL",
+      "signal_ts": "2024-12-02",
+      "sleeve": "core_momentum",
+      "symbol": "XLV"
+    },
+    {
+      "fee": "0.00",
+      "fill_ts": "2024-12-03",
+      "price": "43.64941380",
+      "qty": "429",
+      "seq": "275",
+      "side": "BUY",
+      "signal_ts": "2024-12-02",
+      "sleeve": "core_momentum",
+      "symbol": "EEM"
+    },
+    {
+      "fee": "0.00",
+      "fill_ts": "2024-12-03",
+      "price": "96.62959065",
+      "qty": "198",
+      "seq": "276",
+      "side": "BUY",
+      "signal_ts": "2024-12-02",
+      "sleeve": "core_momentum",
+      "symbol": "TLT"
+    }
+  ],
+  "ledger_sha256": "b640bb21f0a2254410d1e7b618d348c6f4fdf5bc89e6b9a27345ddcc7423b9ea",
+  "metrics": {
+    "cagr": -0.003673978091968233,
+    "exposure_avg": 0.7347537647527452,
+    "max_drawdown": -0.26829235403931107,
+    "sharpe": 0.029932807274606406,
+    "sortino": 0.041868100374221714,
+    "total_return": -0.021827599999999947,
+    "trade_count": 59,
+    "win_rate": 0.4745762711864407
+  },
+  "n_signals": 72,
+  "schema_version": 1,
+  "start": "2019-01-02"
+}

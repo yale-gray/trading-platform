@@ -207,6 +207,8 @@ Tasks within a wave can run in parallel when their file lists don't overlap.
 
 **A9. Risk caps are measured at order acceptance** (SPEC-003 I10). Slippage and later drift can leave a realised weight slightly above 25%/30%, and that is not force-sold.
 
+**A11. Blend benchmark is monthly-rebalanced**, not static. It runs through the same engine and costs as the fund. That makes it the harder bar, so gate 3 is not flattered. It stays named `blend` (no golden re-pin).
+
 **A10. Lean process from Wave 4** (owner decision): see CLAUDE.md "Lean mode".
 
 ## Consequences

@@ -53,7 +53,7 @@ markers = [
     "integration: multi-module tests",
     "golden: pinned-result tests (changes need a PM-approved note)",
     "restart: runner crash/restart and idempotency tests",
-    "slow: tests over 2 seconds",
+    "slow: tests over 2 seconds (run in the main/nightly CI job, not on PRs)",
 ]
 filterwarnings = [
     "error",

@@ -34,6 +34,7 @@ One row per dispatched task. We use this to judge whether the Opus PM → Sonnet
 | 2026-10-21 | 006 review | reviewer | Sonnet | done | 1 | n/a | REQUEST-CHANGES: chart RSI/ATR/EMA off by up to ~5 points (short warmup) and a wall-clock read; fixed and re-reviewed |
 | 2026-10-21 | Wave 3 (≈17 build/test tasks + reviewer + audit + 2 fixers) | mixed | mostly Sonnet | done | 1 | no | Most expensive wave so far; owner hit ~50% of a 5-hour limit. Switched to lean mode for Wave 4 |
 | 2026-10-21 | Wave 4 (lean: 4 build agents + 1 audit + 1 fix) | Sonnet ×4, Haiku ×1 | mixed | done | 0 | no | 6 agents total vs ~20 in Wave 3. Audit found no blockers; gates/goldens/CI split delivered |
+| 2026-10-21 | Wave 5 (lean: 3 build + 1 audit + 1 fix) | Sonnet ×4, Haiku ×1 | mixed | done | 0 | no | 5 agents. Audit: no blockers; runner == backtest verified independently. Two usage-limit interruptions resumed cleanly |
 
 ## Retrospective notes
 ### Lead research round (2026-10-20)

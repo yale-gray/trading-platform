@@ -21,7 +21,7 @@ from tradebot.strategy.engine import compile_strategy
 from tradebot.strategy.io import STRATEGIES_DIR, load_strategy
 from tradebot.strategy.schema import STRATEGIES
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 STRATEGY_SLEEVES = ("core_momentum", "mean_reversion", "crypto_trend")
 INITIAL_CAPITAL = Decimal("100000.00")

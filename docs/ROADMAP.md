@@ -43,10 +43,17 @@ Status key: `[ ]` todo · `[~]` in progress · `[x]` done. The PM owns this file
 - [x] Audit PASS-WITH-NOTES; fixes applied (window pins, gate boundaries, production walk-forward defaults)
 - Result on synthetic fixtures: all three sleeves **fail** the gate (hold). Expected on practice data; real-data runs come with Wave 5
 
-## Wave 5: Paper trading + dashboard (next, lean mode)
-- [ ] SQLite persistence, restart-safe APScheduler runner, engine checkpoints (004)
-- [ ] FastAPI endpoints, unified `tradebot` CLI
-- [ ] Streamlit dashboard (dev console pages merge in): portfolios, equity vs benchmark, positions, trades, perf cards
+## Wave 5: Paper trading + dashboard (done 2026-10-21, lean mode)
+- [x] SQLite persistence (WAL, TEXT Decimal), restart-safe runner (one transaction per portfolio per bar, checkpoint incl. TargetBook, catch-up, stale-runner refusal), scheduler
+- [x] FastAPI (3 write routes only: kill-switch ack, save strategy, queue backtest), unified `tradebot` CLI incl. `runner reset-from`
+- [x] Dashboard (`dashboard/app.py`, port 8502) via the API; dev console pages merged in as a "Developer" section
+- [x] Audit PASS-WITH-NOTES: runner ledger == backtest ledger; crash/restart identical; fixes applied
+- [ ] Later: checkpoint without the full ledger (DB ≈13 MB/yr for 3 portfolios); dashboard banner for `benchmark_missing`; confirm restated-bar handling stays in the data layer
+
+## Next: go live on paper
+- [ ] `uv run tradebot data refresh` to download real prices into the local cache
+- [ ] Real-data backtests of the three sleeves through the validation gate
+- [ ] `tradebot db init` → `portfolio create` (fund + SPY/BTC benchmarks) → `tradebot runner start` for daily paper trading
 
 ## Phase 6: AI and templates (later)
 - [ ] Claude plain-English → strategy schema builder

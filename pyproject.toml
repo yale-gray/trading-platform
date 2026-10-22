@@ -59,6 +59,8 @@ filterwarnings = [
     "error",
     # exchange-calendars 4.13 on numpy 2.x; remove when exchange-calendars is upgraded
     "ignore:The 'generic' unit for NumPy timedelta is deprecated:DeprecationWarning",
+    # Starlette >= 1.0 prefers httpx2 for its TestClient; httpx still works (drop with httpx2)
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated:starlette.exceptions.StarletteDeprecationWarning",
 ]
 
 [tool.coverage.run]

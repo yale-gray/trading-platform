@@ -39,6 +39,7 @@ def test_backtests_page_renders_with_default_selections_and_no_exception() -> No
 
 
 @pytest.mark.timeout(120)
+@pytest.mark.slow
 def test_run_backtest_button_renders_results_without_exception() -> None:
     at = _page()
     at.button(key="run_backtest").click().run(timeout=TIMEOUT)

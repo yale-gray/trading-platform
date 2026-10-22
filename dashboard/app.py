@@ -14,7 +14,15 @@ if str(_REPO_ROOT) not in sys.path:
 import streamlit as st  # noqa: E402
 
 from dashboard.views import backtests as bot_backtests  # noqa: E402
-from dashboard.views import portfolio_detail, portfolios, runner  # noqa: E402
+from dashboard.views import (  # noqa: E402
+    portfolio_detail,
+    portfolios,
+    runner,
+    section_crypto,
+    section_daytrading,
+    section_index,
+    section_stocks,
+)
 from dashboard.views import strategies as bot_strategies  # noqa: E402
 from devconsole.views import backtests as dev_backtests  # noqa: E402
 from devconsole.views import cost_sandbox, market_data, overview, quality  # noqa: E402
@@ -30,6 +38,12 @@ st.navigation(
             st.Page(bot_strategies.render, title="Strategies", url_path="strategies"),
             st.Page(bot_backtests.render, title="Backtests", url_path="backtests"),
             st.Page(runner.render, title="Runner status", url_path="runner"),
+        ],
+        "Sections": [
+            st.Page(section_index.render, title="Index funds", url_path="index-funds"),
+            st.Page(section_stocks.render, title="Stocks", url_path="stocks"),
+            st.Page(section_crypto.render, title="Crypto", url_path="crypto"),
+            st.Page(section_daytrading.render, title="Day trading", url_path="day-trading"),
         ],
         "Developer": [
             st.Page(overview.render, title="Overview", url_path="dev-overview"),

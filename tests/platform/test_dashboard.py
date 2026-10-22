@@ -397,3 +397,144 @@ def test_portfolio_detail_groups_by_section_and_shows_day_trading_placeholder(
 
     assert [c.value for c in at.caption if SP500_LABEL in c.value]  # Stocks section only
     assert len([c for c in at.caption if SP500_LABEL in c.value]) == 1
+
+
+# ---- sections: Index funds, Stocks, Crypto, Day trading ---------------------------------
+
+SECTION_PAGES = {
+    "index": "dashboard.views.section_index",
+    "stocks": "dashboard.views.section_stocks",
+    "crypto": "dashboard.views.section_crypto",
+    "daytrading": "dashboard.views.section_daytrading",
+}
+SECTION_TITLES = {
+    "index": "Index funds",
+    "stocks": "Stocks",
+    "crypto": "Crypto",
+    "daytrading": "Day trading",
+}
+NO_TRADES_TEXT = "No trades yet — the first orders fill at the next market open."
+SECTION_SLEEVES = [
+    {**SLEEVE, "key": k, "strategy_name": k} for k in ("index", "core_momentum", "stocks", "crypto")
+]
+SECTION_POSITIONS = [
+    {**POSITION, "sleeve_key": "index"},
+    {**POSITION, "sleeve_key": "crypto", "symbol": "BTC/USD"},
+]
+SECTION_TRADES = {
+    **TRADES_PAGE,
+    "items": [{**TRADE, "sleeve_key": "stocks"}, {**TRADE, "sleeve_key": "index"}],
+}
+
+
+def _section_canned(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    sleeves: list[dict] = SECTION_SLEEVES,
+    positions: list[dict] = SECTION_POSITIONS,
+    trades: dict = SECTION_TRADES,
+    equity: list[dict] = EQUITY,
+    portfolios: list[dict] | None = None,
+) -> None:
+    _canned(monkeypatch)
+    monkeypatch.setattr(
+        client, "list_portfolios", lambda: [PORTFOLIO, BENCH] if portfolios is None else portfolios
+    )
+    monkeypatch.setattr(client, "get_portfolio", lambda pid: {**DETAIL, "sleeves": sleeves})
+    monkeypatch.setattr(client, "get_positions", lambda pid: positions)
+    monkeypatch.setattr(client, "get_trades", lambda pid, limit=50, offset=0: trades)
+    monkeypatch.setattr(client, "get_equity", lambda pid, sleeve=None: equity)
+
+
+@pytest.mark.parametrize("name", list(SECTION_PAGES))
+def test_section_pages_render_on_canned_data(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    _section_canned(monkeypatch)
+    at = _page(SECTION_PAGES[name])
+    assert not at.exception, [e.value for e in at.exception]
+    assert [t.value for t in at.title] == [SECTION_TITLES[name]]
+    assert any("Simulated money only" in i.value for i in at.info)
+    api_errors = [e for e in _error_text(at) if "API" in e or "not running" in e]
+    assert not api_errors, api_errors
+
+
+def test_section_page_shows_only_its_own_sleeves(monkeypatch: pytest.MonkeyPatch) -> None:
+    _section_canned(monkeypatch)
+    at = _page(SECTION_PAGES["index"])
+    assert not at.exception, [e.value for e in at.exception]
+    positions, trades = [d.value for d in at.dataframe]
+    assert set(positions["Sleeve"]) == {"index"}  # the crypto position is not shown
+    assert set(trades["Sleeve"]) == {"index"}  # the stocks trade is filtered out
+    assert len(trades) == 1
+
+
+def test_stocks_page_carries_survivorship_caveat(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tradebot.data.universe import SP500_LABEL
+
+    _section_canned(monkeypatch)
+    at = _page(SECTION_PAGES["stocks"])
+    assert not at.exception, [e.value for e in at.exception]
+    assert any(SP500_LABEL in c.value for c in at.caption)
+
+
+def test_index_and_crypto_pages_have_no_survivorship_caveat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tradebot.data.universe import SP500_LABEL
+
+    _section_canned(monkeypatch)
+    for name in ("index", "crypto"):
+        at = _page(SECTION_PAGES[name])
+        assert not any(SP500_LABEL in c.value for c in at.caption), name
+
+
+def test_section_without_sleeves_shows_friendly_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    only_crypto = [s for s in SECTION_SLEEVES if s["key"] == "crypto"]
+    _section_canned(monkeypatch, sleeves=only_crypto)
+    at = _page(SECTION_PAGES["index"])
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("has no index funds sleeve" in i.value for i in at.info)
+    assert not at.dataframe
+
+
+def test_section_without_trades_says_first_orders_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    empty = {**TRADES_PAGE, "items": [], "total": 0}
+    _section_canned(monkeypatch, trades=empty, positions=[], equity=[])
+    at = _page(SECTION_PAGES["crypto"])
+    assert not at.exception, [e.value for e in at.exception]
+    assert any(i.value == NO_TRADES_TEXT for i in at.info)
+    assert any("no value history yet" in c.value for c in at.caption)
+
+
+def test_section_with_no_portfolios_points_to_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    _section_canned(monkeypatch, portfolios=[])
+    at = _page(SECTION_PAGES["stocks"])
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("No portfolios yet" in i.value for i in at.info)
+
+
+def test_default_portfolio_is_first_fund_kind() -> None:
+    assert common.default_portfolio_index([BENCH, PORTFOLIO]) == 1
+    assert common.default_portfolio_index([BENCH]) == 0
+    assert common.default_portfolio_index([]) == 0
+
+
+def test_day_trading_page_is_a_placeholder(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(*_a: object, **_k: object) -> None:
+        raise AssertionError("day trading page must not call the API")
+
+    monkeypatch.setattr(client, "list_portfolios", boom)
+    at = _page(SECTION_PAGES["daytrading"])
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("Alpaca market-data key" in i.value for i in at.info)
+    assert not at.dataframe
+
+
+@pytest.mark.parametrize("name", ["index", "stocks", "crypto"])
+def test_unreachable_api_on_section_pages_shows_friendly_message(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    monkeypatch.setattr(httpx.Client, "send", _refuse)
+    at = _page(SECTION_PAGES[name])
+    assert not at.exception, [e.value for e in at.exception]
+    errors = _error_text(at)
+    assert errors and all(API_HINT in e for e in errors), errors

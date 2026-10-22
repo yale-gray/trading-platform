@@ -10,12 +10,39 @@ import streamlit as st
 
 from dashboard import client
 from dashboard.client import ApiError, ApiUnavailable
+from tradebot.data.universe import SP500_LABEL
 
 START_HINT = "Start it with `uv run tradebot api serve`."
 BANNER = (
     "**Simulated money only.** Nothing on this page trades real money, "
     "and nothing here is financial advice."
 )
+
+SECTIONS: tuple[tuple[str, frozenset[str]], ...] = (
+    ("Index funds", frozenset({"index", "core_momentum", "mean_reversion"})),
+    ("Stocks", frozenset({"stocks"})),
+    ("Crypto", frozenset({"crypto", "crypto_trend"})),
+)
+"""Dashboard sections by sleeve key. Keys in no section are listed under "Other"."""
+
+OTHER = "Other"
+SP500_NOTE = f"Stock universe: {SP500_LABEL}."
+
+
+def section_of(sleeve_key: str) -> str:
+    """The section title a sleeve belongs to (``OTHER`` when it matches none)."""
+    for title, keys in SECTIONS:
+        if sleeve_key in keys:
+            return title
+    return OTHER
+
+
+def default_portfolio_index(portfolios: list[dict[str, Any]]) -> int:
+    """Index of the first fund-kind portfolio, or 0 when there is none."""
+    for i, p in enumerate(portfolios):
+        if p.get("kind") == "fund":
+            return i
+    return 0
 
 
 def banner() -> None:

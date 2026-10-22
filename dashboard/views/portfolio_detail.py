@@ -8,7 +8,7 @@ import streamlit as st
 
 from dashboard import client
 from dashboard.views import common
-from tradebot.data.universe import SP500_LABEL
+from dashboard.views.common import OTHER, SECTIONS, SP500_NOTE, section_of
 
 TRADES_PAGE_SIZE = 50
 
@@ -112,24 +112,7 @@ def _equity_charts(pid: int, detail: dict) -> None:
     st.plotly_chart(dd_fig)
 
 
-SECTIONS: tuple[tuple[str, frozenset[str]], ...] = (
-    ("Index funds", frozenset({"index", "core_momentum", "mean_reversion"})),
-    ("Stocks", frozenset({"stocks"})),
-    ("Crypto", frozenset({"crypto", "crypto_trend"})),
-)
-"""Dashboard sections by sleeve key. Keys in no section are listed under "Other"."""
-
-OTHER = "Other"
-SP500_NOTE = f"Stock universe: {SP500_LABEL}."
 DAY_TRADING_NOTE = "Coming once the Alpaca data key is set up."
-
-
-def section_of(sleeve_key: str) -> str:
-    """The section title a sleeve belongs to (``OTHER`` when it matches none)."""
-    for title, keys in SECTIONS:
-        if sleeve_key in keys:
-            return title
-    return OTHER
 
 
 def _sections(pid: int, detail: dict) -> None:

@@ -50,10 +50,22 @@ Status key: `[ ]` todo · `[~]` in progress · `[x]` done. The PM owns this file
 - [x] Audit PASS-WITH-NOTES: runner ledger == backtest ledger; crash/restart identical; fixes applied
 - [ ] Later: checkpoint without the full ledger (DB ≈13 MB/yr for 3 portfolios); dashboard banner for `benchmark_missing`; confirm restated-bar handling stays in the data layer
 
-## Next: go live on paper
-- [ ] `uv run tradebot data refresh` to download real prices into the local cache
-- [ ] Real-data backtests of the three sleeves through the validation gate
-- [ ] `tradebot db init` → `portfolio create` (fund + SPY/BTC benchmarks) → `tradebot runner start` for daily paper trading
+## Real-data check (2026-10-21)
+- [x] Real prices downloaded: 17 ETFs (from 2005), BTC/SOL, ETH (crypto history starts 2017 to avoid a Coinbase ETH gap in 2016)
+- [x] First real-data backtests, with fair settings (fund caps and kill switch relaxed) vs buy-and-hold:
+  - crypto trend: 22.9%/yr, worst drop −47%, Sharpe 0.92 vs BTC 22.9%/yr, −81%, 0.65 (**promising**)
+  - core momentum: 2.4%/yr, Sharpe 0.25 vs SPY 14.1%/yr, 0.86 (**loses**: inverse-vol sizing tilts it to bonds/gold)
+  - mean reversion: 1.7%/yr, Sharpe 0.31 vs SPY (**loses**: mostly in cash)
+
+## Wave 6: two-account product (next, lean mode) — ADR A12–A16
+- [ ] **Owner action:** create a free Alpaca account (market data only) and add the key to `.env`
+- [ ] Backtest setup fix (A16): per-strategy caps for single-strategy tests; report `killed_on`; results with/without kill switch
+- [ ] Rework the index-fund strategies (they lose to SPY): e.g. momentum without the bond tilt, or a trend-filtered SPY/QQQ core
+- [ ] Individual stocks: S&P 500 universe (point-in-time membership if available), daily data, a stock-selection strategy
+- [ ] Intraday: Alpaca 15-minute bars, intraday calendar, flatten-before-close, PDT/settlement constraint, runner ticking every 15 min during market hours
+- [ ] Day-trading strategies: "buy sharp dips" + "ride breakouts", tested side by side through the gate
+- [ ] Two $10k portfolios (Smart: 50/40/10; Day trading), dashboard organised into four sections
+- [ ] Then go live: `db init` → create both accounts → `runner start`
 
 ## Phase 6: AI and templates (later)
 - [ ] Claude plain-English → strategy schema builder

@@ -44,7 +44,9 @@ log = logging.getLogger(__name__)
 # First bar requested when a symbol has no cache and the caller gave no start.
 DEFAULT_HISTORY_START: dict[AssetClass, date] = {
     AssetClass.EQUITY: date(2005, 1, 1),
-    AssetClass.CRYPTO: date(2015, 1, 1),
+    # 2017: Coinbase ETH-USD has missing daily candles on 2016-05-21/22, which the
+    # gap check (correctly) rejects; starting later keeps every crypto series gap-free.
+    AssetClass.CRYPTO: date(2017, 1, 1),
 }
 
 

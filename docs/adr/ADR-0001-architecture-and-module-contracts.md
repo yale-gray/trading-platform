@@ -211,6 +211,25 @@ Tasks within a wave can run in parallel when their file lists don't overlap.
 
 **A10. Lean process from Wave 4** (owner decision): see CLAUDE.md "Lean mode".
 
+## 7. Addendum: two-account product (owner decisions 2026-10-21)
+
+**A12. Two paper accounts, $10,000 each.** These replace the single $100k fund.
+- **Smart investing:** 50% index funds, 40% individual stocks, 10% crypto.
+- **Day trading:** S&P 500 stocks on 15-minute bars.
+
+Each account is a separate portfolio with its own ledger, kill switch and benchmark. The platform and dashboard are organised into four sections: index funds, stocks, crypto, and stock day trading. Both accounts go live together, after Wave 6.
+
+**A13. Individual stocks: the full S&P 500 universe.** Daily bars come from Yahoo. The universe must be date-aware, using point-in-time index membership, to avoid survivorship bias. If no free point-in-time list is available, results must be labelled "current-constituents (survivorship-biased)".
+
+**A14. Day trading: stock intraday data from Alpaca (market data only).** The owner creates a free Alpaca account and puts the key in `.env`; Claude never handles keys. The Alpaca trading API is never used; the hard rule "no real-broker code" stands. Day-trading rules:
+- no positions held overnight (flatten before the close);
+- a simulated PDT/settlement constraint, so results reflect what a $10k real account could actually do;
+- "buy sharp dips" and "ride breakouts" strategies tested side by side through the gate.
+
+**A15. Path to real money (not in scope).** Real money is considered only after an account passes the full validation gate, including ≥ 3 months of paper trading. It needs its own ADR and safety review. The owner places any real trades. Nothing here is financial advice.
+
+**A16. Backtest setup fix.** Single-strategy backtests must not inherit whole-fund caps (25%/30%). A tripped kill switch in a backtest must be reported (`killed_on`). Strategy edge is reported with and without the kill switch, so a trip doesn't silently mask the result.
+
 ## Consequences
 - **One loop (`BarDriver`) and one engine** mean a backtest result and a paper result for the same bars must match exactly. SPEC-005 can test that directly.
 - **Synthetic fixtures** keep the public repo clean and the goldens stable, but CI never sees real market data. Real-data sanity checks are a manual, local step before any strategy passes the gate.

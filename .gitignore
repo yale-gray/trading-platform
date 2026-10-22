@@ -9,3 +9,6 @@ data/cache/
 *.sqlite
 .DS_Store
 .hypothesis/
+*.db-shm
+*.db-wal
+*.db-journal

@@ -1,0 +1,15 @@
+schema_version: 1
+id: index_trend_core
+name: Trend-filtered SPY/QQQ core (IEF when below trend)
+kind: rotation
+asset_class: equity
+parameters: {mom_lookback: 126, trend_len: 200, top_n: 2}
+universe: [SPY, QQQ]
+schedule: {freq: monthly}
+eligibility:
+  gt: [{price: close}, {ind: sma, period: $trend_len}]
+filter_mode: pre_rank
+rank: {by: {ind: ret, period: $mom_lookback}, order: desc}
+select: {top: $top_n, weighting: equal}
+fallback: {symbol: IEF}            # a slot whose index is below its 200-day average goes to IEF
+# Run with override "vol_scaled": false (equal weights).

@@ -1,0 +1,16 @@
+schema_version: 1
+id: index_mom_equal
+name: ETF momentum, equal weight (no vol-scaling)
+kind: rotation
+asset_class: equity
+parameters: {mom_lookback: 126, trend_len: 200, top_n: 3}
+universe: [SPY, QQQ, IWM, EFA, EEM, TLT, GLD, XLK, XLF, XLE, XLV, XLI, XLY, XLP, XLU, XLB]
+schedule: {freq: monthly}
+eligibility:
+  gt: [{price: close}, {ind: sma, period: $trend_len}]
+filter_mode: pre_rank
+rank: {by: {ind: ret, period: $mom_lookback}, order: desc}
+select: {top: $top_n, weighting: equal}
+fallback: {symbol: IEF}
+# Same rules as core_momentum. Run with the sleeve option vol_scaled=false (override
+# "vol_scaled": false) so weights are truly equal instead of inverse-volatility tilted.

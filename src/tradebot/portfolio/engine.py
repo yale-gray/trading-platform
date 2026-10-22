@@ -159,7 +159,9 @@ class PortfolioEngine:
             cfg, self._portfolio, id_gen=self._ids, asset_class_of=self._asset_class_of
         )
         self._stops = StopBook()
-        self._ks = KillSwitch(cfg.initial_capital, cfg.risk.kill_switch_drawdown)
+        self._ks = KillSwitch(
+            cfg.initial_capital, cfg.risk.kill_switch_drawdown, cfg.risk.kill_switch_pause_bars
+        )
         self._episode: dict[tuple[str, str], int] = {}
         self._next_transfer_n = 0
         self._last_asof: date | None = None
@@ -208,7 +210,7 @@ class PortfolioEngine:
         )
         self._restore_book(state)
         self._stops = StopBook.from_state(state.stop_state)
-        self._ks = KillSwitch.from_state(state.kill_state)
+        self._ks = KillSwitch.from_state(state.kill_state, cfg.risk.kill_switch_pause_bars)
         self._episode = {}
         for sid, syms in self._stops.to_state()["levels"].items():
             for sym in syms:
@@ -246,7 +248,12 @@ class PortfolioEngine:
         kill_events = [
             e
             for e in state.ledger
-            if e.type in (EventType.KILL_SWITCH_TRIPPED, EventType.KILL_SWITCH_RESET)
+            if e.type
+            in (
+                EventType.KILL_SWITCH_TRIPPED,
+                EventType.KILL_SWITCH_RESET,
+                EventType.KILL_SWITCH_REARMED,
+            )
         ]
         killed = bool(state.kill_state.get("killed"))
         should_be_killed = (
@@ -254,6 +261,15 @@ class PortfolioEngine:
         )
         if killed != should_be_killed:
             raise StateCorruptionError("kill_state.killed does not match the KILL_SWITCH events")
+        try:
+            paused = int(state.kill_state.get("bars_paused", 0))
+            pause_len = int(
+                state.kill_state.get("pause_bars", self._config.risk.kill_switch_pause_bars)
+            )
+        except (TypeError, ValueError) as exc:
+            raise StateCorruptionError(f"kill_state pause fields unreadable: {exc}") from exc
+        if paused < 0 or (killed and paused >= pause_len) or (not killed and paused != 0):
+            raise StateCorruptionError("kill_state.bars_paused is inconsistent with the pause")
         try:
             peak = Decimal(str(state.kill_state["peak_equity"]))
             floor = (
@@ -264,7 +280,7 @@ class PortfolioEngine:
             last_equity = Decimal(str(state.kill_state["last_equity"]))
         except (KeyError, ArithmeticError, TypeError) as exc:
             raise StateCorruptionError(f"kill_state unreadable: {exc}") from exc
-        if peak < floor or peak < last_equity:
+        if peak < floor or (not killed and peak < last_equity):
             raise StateCorruptionError("kill_state.peak_equity is inconsistent with history")
         last_event = max((e.asof for e in state.ledger), default=_UNFUNDED_ASOF)
         if (state.last_processed_asof or _UNFUNDED_ASOF) < last_event:
@@ -404,6 +420,18 @@ class PortfolioEngine:
                 if o.side is Side.BUY:
                     cancelled.append(self._broker.cancel_order(o.order_id))
             self._plan = None
+        elif obs.rearmed_now:
+            self._ledger.append(
+                asof=asof,
+                stage=Stage.CLOSE,
+                sleeve_id=PORTFOLIO_SLEEVE_ID,
+                type=EventType.KILL_SWITCH_REARMED,
+                metadata={
+                    "equity": str(snap.equity),
+                    "peak_equity": str(obs.peak_equity),
+                    "pause_bars": str(self._ks.pause_bars),
+                },
+            )
         # F: rebalance decision.
         planned = False
         if self._last_rebalance_month is None:

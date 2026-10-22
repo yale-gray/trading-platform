@@ -40,28 +40,40 @@ cents_equity = st.integers(1_00, 400_000_00).map(lambda c: D(c) / 100)
 @given(
     path=st.lists(cents_equity, min_size=1, max_size=40),
     threshold=st.sampled_from((D("0.20"), D("0.10"), D("0.35"))),
+    pause=st.sampled_from((1, 3, 20)),
     reset_at=st.sets(st.integers(0, 39), max_size=4),
 )
-def test_killswitch_trips_iff_drawdown_and_is_sticky(
-    path: list[Decimal], threshold: D, reset_at: set[int]
+def test_killswitch_trips_iff_drawdown_and_pauses_then_rearms(
+    path: list[Decimal], threshold: D, pause: int, reset_at: set[int]
 ) -> None:
-    """I12: exact trip rule, running peak, stickiness, reset only when tripped."""
-    ks = KillSwitch(CAP, threshold)
-    peak, killed = CAP, False
+    """I12 + A18: exact trip rule, running peak, sticky for N bars then re-armed, manual reset."""
+    ks = KillSwitch(CAP, threshold, pause)
+    peak, killed, paused = CAP, False, 0
     for i, eq in enumerate(path):
         asof = START + timedelta(days=i)
-        peak = max(peak, eq)
-        obs = ks.observe(eq, asof)
-        trips = Fraction(1) - Fraction(eq) / Fraction(peak) >= Fraction(threshold)
-        assert obs.tripped_now == (trips and not killed)
-        killed = killed or trips
+        if killed:
+            paused += 1
+            obs = ks.observe(eq, asof)
+            assert not obs.tripped_now
+            if paused >= pause:
+                killed, peak, paused = False, eq, 0
+                assert obs.rearmed_now and not obs.killed
+            else:
+                assert not obs.rearmed_now and obs.killed
+        else:
+            peak = max(peak, eq)
+            obs = ks.observe(eq, asof)
+            trips = Fraction(1) - Fraction(eq) / Fraction(peak) >= Fraction(threshold)
+            assert obs.tripped_now == trips and not obs.rearmed_now
+            killed, paused = trips, 0
         assert ks.killed == killed == obs.killed
         assert ks.peak_equity == peak == obs.peak_equity
         assert ks.allows_buy() == (not killed) and ks.rebalance_frozen == killed
         if i in reset_at:
             if killed:
                 ks.reset("op", "n", asof)
-                killed, peak = False, eq.quantize(D("0.01"), rounding=ROUND_HALF_EVEN)
+                killed, paused = False, 0
+                peak = eq.quantize(D("0.01"), rounding=ROUND_HALF_EVEN)
                 assert ks.peak_equity == peak
             else:
                 with pytest.raises(ValueError, match="not tripped"):

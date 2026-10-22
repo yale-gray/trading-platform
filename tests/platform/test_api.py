@@ -35,7 +35,9 @@ JSON = {"content-type": "application/json"}
 def client(db: Engine, market_cache: Path) -> Iterator[TestClient]:
     """Benchmark + hair-trigger fund (trips on 2019-01-04) processed to 2019-03-01."""
     hair = default_config().model_copy(
-        update={"risk": RiskConfig(kill_switch_drawdown=Decimal("0.0005"))}
+        update={
+            "risk": RiskConfig(kill_switch_drawdown=Decimal("0.0005"), kill_switch_pause_bars=1000)
+        }
     )
     seed(
         db,
@@ -222,6 +224,24 @@ def test_backtest_job_runs_persists_and_feeds_the_card(client: TestClient, db: E
     assert card["benchmark_return_1y_pct"] is not None
 
 
+def test_backtest_payload_carries_caveats_and_all_trips(client: TestClient) -> None:
+    from tradebot.data.universe import SP500_LABEL
+
+    for sid_, caveats in (("core_momentum", []), ("stocks_probe", [SP500_LABEL])):
+        spec = {**_spec(), "id": sid_}
+        sid = client.post(
+            f"{V1}/strategies", json={"name": sid_, "market": "equity", "schema_": spec}
+        ).json()["id"]
+        run_id = client.post(
+            f"{V1}/backtests", json={"strategy_id": sid, "start": "2019-01-02", "end": "2019-06-28"}
+        ).json()["id"]
+        client.app.state.jobs.wait_idle(60)  # type: ignore[attr-defined]
+        detail = client.get(f"{V1}/backtests/{run_id}").json()
+        assert detail["status"] == "done", detail["error"]
+        assert detail["result"]["caveats"] == caveats
+        assert isinstance(detail["result"]["killed_dates"], list)
+
+
 def test_backtest_failure_is_recorded_and_bad_requests_rejected(client: TestClient) -> None:
     sid = client.post(
         f"{V1}/strategies", json={"name": "mom2", "market": "equity", "schema_": _spec()}
@@ -256,6 +276,10 @@ BAD_OVERRIDES: list[dict] = [  # type: ignore[type-arg]
     {"rf_annual": 0.21},
     {"rf_annual": float("inf")},
     {"rf_annual": True},
+    {"kill_switch": "off"},
+    {"max_asset_fraction": 0},
+    {"max_asset_fraction": 1.5},
+    {"max_crypto_fraction": True},
 ]
 
 
@@ -290,7 +314,12 @@ def test_backtest_accepts_valid_overrides_and_refuses_end_after_last_closed_bar(
         "strategy_id": sid,
         "start": "2019-01-02",
         "end": "2024-12-31",
-        "overrides": {"initial_capital": "50000.25", "rf_annual": 0.2},
+        "overrides": {
+            "initial_capital": "50000.25",
+            "rf_annual": 0.2,
+            "kill_switch": False,
+            "max_asset_fraction": 0.5,
+        },
     }
     assert client.post(f"{V1}/backtests", json=ok).status_code == 202
     client.app.state.jobs.wait_idle(60)  # type: ignore[attr-defined]

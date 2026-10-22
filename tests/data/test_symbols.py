@@ -38,7 +38,6 @@ def test_normalize_accepts_spec_forms_and_maps_to_canonical(raw: str, canonical:
         "DOGE-USD",
         "DOGEUSD",
         "BTC/EUR",
-        "BRK.B",
         "",
         "ABCDEF",  # equities are 1-5 letters
         "SPY1",
@@ -76,3 +75,20 @@ def test_to_yahoo_replaces_slash_with_dash():
 
 def test_to_yahoo_leaves_equity_unchanged():
     assert to_yahoo(normalize_symbol("spy")) == "SPY"
+
+
+@pytest.mark.parametrize(
+    ("raw", "canonical", "yahoo"),
+    [("BRK.B", "BRK.B", "BRK-B"), ("brk-b", "BRK.B", "BRK-B"), ("BF.B", "BF.B", "BF-B")],
+)
+def test_class_share_tickers(raw: str, canonical: str, yahoo: str):
+    sym = normalize_symbol(raw)
+    assert sym == canonical
+    assert asset_class(sym) is AssetClass.EQUITY
+    assert to_yahoo(sym) == yahoo
+
+
+@pytest.mark.parametrize("raw", ["BRK.BB", "ABCDEF.B", ".B", "BRK.", "BTC", "A.1"])
+def test_class_share_rejects_bad_forms(raw: str):
+    with pytest.raises(UnknownSymbolError):
+        normalize_symbol(raw)

@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict
 from tradebot.data.symbols import asset_class, normalize_symbol
 from tradebot.portfolio.config import EngineConfig
 from tradebot.portfolio.engine import BarResult, PortfolioEngine, TargetResult
+from tradebot.portfolio.models import EventType
 from tradebot.sim.broker import Bar
 from tradebot.strategy import indicators
 from tradebot.strategy.engine import CompiledStrategy, Features, compile_strategy
@@ -239,9 +240,13 @@ class BarDriver:
         # Causal per-symbol arrays; vol20/atr14 are attached to each Bar (ADR D4).
         self._arrays: dict[str, dict[str, np.ndarray]] = {}
         self._index: dict[str, pd.DatetimeIndex] = {}
+        # ts -> row position per symbol: O(1) lookup per bar (get_indexer per symbol per bar
+        # dominated the run time at ~500 symbols).
+        self._pos: dict[str, dict[pd.Timestamp, int]] = {}
         for sym in self._symbols:
             df = self._frames[sym]
             self._index[sym] = df.index
+            self._pos[sym] = {t: i for i, t in enumerate(df.index)}
             self._arrays[sym] = {
                 "open": df["open"].to_numpy(dtype="float64"),
                 "high": df["high"].to_numpy(dtype="float64"),
@@ -276,7 +281,7 @@ class BarDriver:
     def _bars_at(self, ts: pd.Timestamp) -> dict[str, Bar]:
         out: dict[str, Bar] = {}
         for sym in self._symbols:
-            i = int(self._index[sym].get_indexer([ts])[0])
+            i = self._pos[sym].get(ts, -1)
             if i < 0:
                 continue
             a = self._arrays[sym]
@@ -300,12 +305,15 @@ class BarDriver:
         result = self._engine.process_bar(asof, self._bars_at(ts))
         snapshot = self._engine.snapshot()
         positions = {s.sleeve_id: s.positions for s in snapshot.sleeves}
+        # After a kill-switch re-arm every sleeve gets one decision (monthly sleeves would
+        # otherwise stay flat until their next decision bar).
+        rearmed = any(e.type is EventType.KILL_SWITCH_REARMED for e in result.new_ledger_events)
         signals: dict[str, SignalSet] = {}
         targets: dict[str, TargetResult] = {}
         for slot in self._slots:
             sid = slot.sleeve_id
             i = int(slot.feats.calendar.get_indexer([ts])[0])
-            force = not self._book.has_decision(sid)
+            force = rearmed or not self._book.has_decision(sid)
             decision = (
                 i >= 0
                 and asof >= self._start

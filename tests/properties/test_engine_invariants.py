@@ -101,6 +101,7 @@ class Checker:
     peak: Decimal = D("0")
     last_equity: Decimal = D("0")
     killed: bool = False
+    paused: int = 0
     episodes: dict[tuple[str, str], int] = field(default_factory=dict)
     entry_seen: dict[tuple[str, str], date] = field(default_factory=dict)
     ratchet: dict[tuple[str, str, int], tuple[D, D | None]] = field(default_factory=dict)
@@ -222,17 +223,27 @@ class Checker:
     def _check_kill(self, res: Any, asof: date) -> None:
         snap = res.snapshot
         eq = snap.equity
-        if eq > self.peak:
-            self.peak = eq
         self.last_equity = eq
-        trips = drawdown_trips(eq, self.peak, self.threshold)
-        if trips and not self.killed:  # I12: trips iff drawdown >= threshold
-            assert res.kill_switch_tripped
-            self.killed = True
-            self.n_trips += 1
-        else:
+        types = [e.type for e in res.new_ledger_events]
+        if self.killed:  # A18: paused for N processed bars, then re-armed at current equity
             assert not res.kill_switch_tripped
-        assert snap.killed == self.killed  # sticky until manual reset
+            self.paused += 1
+            if self.paused >= self.cfg.risk.kill_switch_pause_bars:
+                self.killed, self.paused, self.peak = False, 0, eq
+                assert "KILL_SWITCH_REARMED" in types
+            else:
+                assert "KILL_SWITCH_REARMED" not in types
+        else:
+            assert "KILL_SWITCH_REARMED" not in types
+            if eq > self.peak:
+                self.peak = eq
+            if drawdown_trips(eq, self.peak, self.threshold):  # I12: trips iff drawdown >= t
+                assert res.kill_switch_tripped
+                self.killed, self.paused = True, 0
+                self.n_trips += 1
+            else:
+                assert not res.kill_switch_tripped
+        assert snap.killed == self.killed  # sticky for N bars (or until manual reset)
         assert snap.peak_equity == self.peak
 
     def reset(self, eng: PortfolioEngine, asof: date) -> None:
@@ -246,6 +257,7 @@ class Checker:
         eng.reset_kill_switch("op", "n", asof)
         self.n_resets += 1
         self.killed = False
+        self.paused = 0
         self.peak = cents(self.last_equity)
 
     def _check_orders(

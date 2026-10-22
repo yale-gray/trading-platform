@@ -18,10 +18,18 @@ from sqlmodel import Session
 
 from tradebot.backtest.driver import TargetBook
 from tradebot.backtest.engine import BacktestConfig, SleeveSpec, _bench_config
+from tradebot.data.types import AssetClass
+from tradebot.data.universe import SP500_LABEL
 from tradebot.db import repo
 from tradebot.db.engine import session_scope
 from tradebot.db.models import KillSwitchState, Portfolio, Sleeve
-from tradebot.portfolio.config import EngineConfig, default_config, sleeve_deposits
+from tradebot.portfolio.config import (
+    CostConfig,
+    EngineConfig,
+    SleeveConfig,
+    default_config,
+    sleeve_deposits,
+)
 from tradebot.portfolio.engine import PortfolioEngine, StateCorruptionError
 from tradebot.portfolio.money import to_text
 from tradebot.runner.clock import market_of
@@ -34,6 +42,7 @@ __all__ = [
     "fund_definition",
     "reset_kill_switch",
     "restore_context",
+    "smart_definition",
 ]
 
 DEFAULT_HISTORY_DAYS = 1100
@@ -64,6 +73,96 @@ def fund_definition(
         kind="fund",
         engine=eng,
         sleeves=sleeves,
+        start=start,
+        data_start=data_start or start - timedelta(days=DEFAULT_HISTORY_DAYS),
+        benchmark=benchmark,
+    )
+
+
+SMART_SLEEVES: tuple[tuple[str, str, str, Decimal, bool, AssetClass], ...] = (
+    # (sleeve_id, display name, strategy file stem, target weight, vol_scaled, asset class)
+    ("index", "Index funds: SPY/QQQ hold", "index_hold", Decimal("0.50"), False, AssetClass.EQUITY),
+    (
+        "stocks",
+        "Stocks: S&P 500 momentum",
+        "stocks_momentum_cash",
+        Decimal("0.40"),
+        False,
+        AssetClass.EQUITY,
+    ),
+    ("crypto", "Crypto trend", "crypto_trend", Decimal("0.10"), True, AssetClass.CRYPTO),
+)
+
+
+SMART_DESCRIPTION = (
+    f"smart investing: 50% index funds (SPY, QQQ), 40% stocks momentum on {SP500_LABEL}, "
+    "10% crypto trend. Stocks sleeve: empty slots stay cash."
+)
+"""One-line preset description; carries the survivorship label (ADR-0001 A13)."""
+
+
+def smart_definition(
+    start: date,
+    *,
+    data_start: date | None = None,
+    name: str = "smart_investing",
+    engine: EngineConfig | None = None,
+    strategies_dir: Path | None = None,
+    benchmark: str | None = "bench_spy",
+) -> PortfolioDef:
+    """The $10,000 "smart investing" account (ADR-0001 A12, A17).
+
+    Sleeves: ``index`` 50% (``index_hold``: SPY + QQQ buy-and-hold), ``stocks`` 40%
+    (``stocks_momentum_cash``, no SPY fallback: empty slots stay cash) and ``crypto`` 10%
+    (``crypto_trend``). There is no cash sleeve: the weights already sum to 1.
+
+    Risk caps differ from the 100k fund. ``max_asset_fraction`` is 0.30 (not 0.25): the index
+    sleeve is 50% of the account split over two ETFs, so SPY and QQQ each target 25% and a
+    25% cap would reject any drift above target. ``max_crypto_fraction`` is 0.15: the crypto
+    sleeve is 10%, and 15% leaves room for drift while still bounding the whole crypto
+    exposure. The 20% / 20-bar kill switch keeps the defaults.
+
+    ``engine`` replaces the generated config (tests). A missing strategy file raises
+    ``RunnerError`` naming the path.
+    """
+    from tradebot.risk.config import RiskConfig
+
+    root = strategies_dir or STRATEGIES_DIR
+    base = default_config()
+    eng = engine or EngineConfig(
+        initial_capital=Decimal("10000.00"),
+        sleeves=tuple(
+            SleeveConfig(
+                sleeve_id=sid,
+                name=label,
+                target_weight=weight,
+                vol_scaled=vol_scaled,
+                allowed_asset_classes=frozenset({ac}),
+            )
+            for sid, label, _stem, weight, vol_scaled, ac in SMART_SLEEVES
+        ),
+        risk=RiskConfig(max_asset_fraction=Decimal("0.30"), max_crypto_fraction=Decimal("0.15")),
+        costs={ac: CostConfig(**c.model_dump()) for ac, c in base.costs.items()},
+    )
+    stems = {sid: stem for sid, _l, stem, _w, _v, _a in SMART_SLEEVES}
+    specs = []
+    for sc in eng.sleeves:
+        stem = stems.get(sc.sleeve_id)
+        if stem is None:
+            specs.append(SleeveSpec(sleeve_id=sc.sleeve_id, strategy=None))
+            continue
+        path = root / f"{stem}.yaml"
+        if not path.is_file():
+            raise RunnerError(
+                f"smart preset needs strategy file {path} for sleeve {sc.sleeve_id!r}, "
+                "but it does not exist"
+            )
+        specs.append(SleeveSpec(sleeve_id=sc.sleeve_id, strategy=load_strategy(path)))
+    return PortfolioDef(
+        name=name,
+        kind="fund",
+        engine=eng,
+        sleeves=tuple(specs),
         start=start,
         data_start=data_start or start - timedelta(days=DEFAULT_HISTORY_DAYS),
         benchmark=benchmark,

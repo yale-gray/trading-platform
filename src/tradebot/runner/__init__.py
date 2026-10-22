@@ -8,6 +8,7 @@ from tradebot.runner.bootstrap import (
     reset_from,
     reset_kill_switch,
     restore_context,
+    smart_definition,
 )
 from tradebot.runner.state import FAULT_POINTS, PortfolioDef, PortfolioTick, RunnerError
 from tradebot.runner.tick import Runner
@@ -25,4 +26,5 @@ __all__ = [
     "reset_from",
     "reset_kill_switch",
     "restore_context",
+    "smart_definition",
 ]

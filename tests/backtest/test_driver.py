@@ -346,3 +346,51 @@ def test_atr_period_other_than_14_is_rejected_when_the_spec_loads(tmp_path) -> N
     path.write_text(text.replace("atr_len: 14", "atr_len: 20"))
     with pytest.raises(ValueError, match="period must be 14"):
         load_strategy(path)
+
+
+def test_bars_at_matches_get_indexer_including_missing_timestamps(monthly_bars) -> None:
+    """``_bars_at`` (dict lookup) equals the old ``get_indexer`` lookup (audit F8)."""
+    frames = {k: v.copy() for k, v in monthly_bars.items()}
+    gap = frames["SPY"].index[40]
+    frames["SPY"] = frames["SPY"].drop(gap)  # SPY has no bar on `gap`; others do
+    driver = BarDriver(StubEngine([MONTHLY, CASH]), _sleeves(), frames, start=RUN_START)
+    stamps = [*list(frames["QQQ"].index[:60]), pd.Timestamp("1999-01-04", tz="UTC")]
+    assert gap in stamps
+    for ts in stamps:
+        got = driver._bars_at(ts)
+        for sym in driver._symbols:
+            i = int(frames[sym].index.get_indexer([ts])[0])
+            if i < 0:
+                assert sym not in got
+            else:
+                assert got[sym].close == float(frames[sym]["close"].iloc[i])
+                assert got[sym].open == float(frames[sym]["open"].iloc[i])
+
+
+def test_rearm_forces_one_decision_on_a_monthly_sleeve(monthly_bars) -> None:
+    """A KILL_SWITCH_REARMED event on a non-decision bar triggers a decision (audit F6)."""
+    from tradebot.portfolio.models import EventType, LedgerEvent, Stage
+
+    probe = BarDriver(StubEngine([MONTHLY, CASH]), _sleeves(), monthly_bars, start=RUN_START)
+    cal = _calendar(probe)
+    month_starts = _month_starts(cal)
+    rearm_day = next(ts for ts in cal[60:] if ts not in month_starts)
+
+    class RearmEngine(StubEngine):
+        def process_bar(self, asof: date, bars: dict) -> BarResult:
+            res = super().process_bar(asof, bars)
+            if asof != rearm_day.date():
+                return res
+            ev = LedgerEvent(
+                seq=1,
+                asof=asof,
+                stage=Stage.CLOSE,
+                sleeve_id="portfolio",
+                type=EventType.KILL_SWITCH_REARMED,
+            )
+            return res.model_copy(update={"new_ledger_events": [ev]})
+
+    driver = BarDriver(RearmEngine([MONTHLY, CASH]), _sleeves(), monthly_bars, start=RUN_START)
+    results = [driver.step(ts) for ts in cal]
+    decided = {r.ts for r in results if MONTHLY in r.signals}
+    assert decided == month_starts | {rearm_day}

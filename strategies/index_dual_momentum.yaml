@@ -1,0 +1,15 @@
+schema_version: 1
+id: index_dual_momentum
+name: Dual momentum (US vs international, else bonds)
+kind: rotation
+asset_class: equity
+parameters: {mom_lookback: 252, top_n: 1}
+universe: [SPY, EFA]
+schedule: {freq: monthly}
+eligibility:                       # absolute momentum: only a positive 12-month return qualifies
+  gt: [{ind: ret, period: $mom_lookback}, 0]
+filter_mode: pre_rank
+rank: {by: {ind: ret, period: $mom_lookback}, order: desc}   # relative momentum: US vs international
+select: {top: $top_n, weighting: equal}
+fallback: {symbol: IEF}            # neither qualifies -> bonds
+# Run with override "vol_scaled": false.

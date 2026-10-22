@@ -375,3 +375,25 @@ def test_money_and_percent_formatting() -> None:
     assert common.money(None) == "—"
     assert common.pct(None) == "—"
     assert common.pct(1.234) == "1.23%"
+
+
+def test_portfolio_detail_groups_by_section_and_shows_day_trading_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _canned(monkeypatch)
+    sleeves = [{**SLEEVE, "key": k, "strategy_name": k} for k in ("index", "stocks", "crypto")]
+    detail = {**DETAIL, "sleeves": sleeves}
+    positions = [{**POSITION, "sleeve_key": "index"}, {**POSITION, "sleeve_key": "crypto"}]
+    monkeypatch.setattr(client, "get_portfolio", lambda pid: detail)
+    trades = {**TRADES_PAGE, "items": [{**TRADE, "sleeve_key": "stocks"}]}
+    monkeypatch.setattr(client, "get_positions", lambda pid: positions)
+    monkeypatch.setattr(client, "get_trades", lambda pid, limit=50, offset=0: trades)
+    at = _page(PAGES["portfolio_detail"])
+    assert not at.exception, [e.value for e in at.exception]
+    headers = [h.value for h in at.header]
+    assert headers == ["Index funds", "Stocks", "Crypto", "Day trading"]
+    assert any("Alpaca data key" in i.value for i in at.info)
+    from tradebot.data.universe import SP500_LABEL
+
+    assert [c.value for c in at.caption if SP500_LABEL in c.value]  # Stocks section only
+    assert len([c for c in at.caption if SP500_LABEL in c.value]) == 1

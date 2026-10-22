@@ -59,9 +59,10 @@ Status key: `[ ]` todo · `[~]` in progress · `[x]` done. The PM owns this file
 
 ## Wave 6: two-account product (next, lean mode) — ADR A12–A16
 - [ ] **Owner action:** create a free Alpaca account (market data only) and add the key to `.env`
-- [ ] Backtest setup fix (A16): per-strategy caps for single-strategy tests; report `killed_on`; results with/without kill switch
-- [ ] Rework the index-fund strategies (they lose to SPY): e.g. momentum without the bond tilt, or a trend-filtered SPY/QQQ core
-- [ ] Individual stocks: S&P 500 universe (point-in-time membership if available), daily data, a stock-selection strategy
+- [x] Backtest setup fix (A16): per-strategy caps, `killed_on`/`killed_dates`, kill switch on/off in CLI and API
+- [x] Index rework: 4 pre-registered candidates all failed the gate → index section = SPY/QQQ buy-and-hold (A17; `docs/research/index-strategies-2026-10.md`)
+- [x] S&P 500 stocks: 501 symbols cached, class shares (BRK.B), `stocks_momentum` 22.1%/yr vs SPY 10.9% but **survivorship-biased** and fails the gate on drawdown (`docs/research/sp500-stocks-2026-10.md`)
+- [x] Kill switch pause-and-re-arm (A18); smart $10k preset (`--preset smart`, 50/40/10); dashboard Index/Stocks/Crypto sections
 - [ ] Intraday: Alpaca 15-minute bars, intraday calendar, flatten-before-close, PDT/settlement constraint, runner ticking every 15 min during market hours
 - [ ] Day-trading strategies: "buy sharp dips" + "ride breakouts", tested side by side through the gate
 - [ ] Two $10k portfolios (Smart: 50/40/10; Day trading), dashboard organised into four sections

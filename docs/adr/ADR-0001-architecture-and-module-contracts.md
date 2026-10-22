@@ -230,6 +230,22 @@ Each account is a separate portfolio with its own ledger, kill switch and benchm
 
 **A16. Backtest setup fix.** Single-strategy backtests must not inherit whole-fund caps (25%/30%). A tripped kill switch in a backtest must be reported (`killed_on`). Strategy edge is reported with and without the kill switch, so a trip doesn't silently mask the result.
 
+**A17. Index section = simple SPY/QQQ buy-and-hold** (owner decision 2026-10-22). Four pre-registered alternatives failed the gate on real data (`docs/research/index-strategies-2026-10.md`), and none beat holding SPY. The index section holds SPY and QQQ 50/50 and is rebalanced with the account's monthly rebalance.
+
+**A18. Kill switch = pause and re-arm** (owner decision 2026-10-22). This replaces the permanent manual halt (SPEC-003 §7):
+- On a ≥ 20% drawdown from peak, block new BUYs (exits still allowed, no forced liquidation) for **20 trading days** (`kill_switch_pause_bars`, configurable).
+- After the pause, re-arm automatically and set the peak to current equity, so the next trip measures from the new level.
+- Book `KILL_SWITCH_TRIPPED` and `KILL_SWITCH_REARMED` ledger events.
+- Pending rebalances are dropped on a trip.
+- The manual CLI reset still works and ends the pause early.
+- Backtests use the same rule, so a single crash no longer freezes a long backtest.
+
+**A19. Wave 6a follow-ups (2026-10-22).**
+- The smart account's stocks sleeve uses `stocks_momentum_cash.yaml`, with no SPY fallback (empty slots stay cash), to avoid clipping against the index sleeve's SPY.
+- After a kill-switch re-arm, every strategy sleeve gets one forced decision on the next bar.
+- S&P 500 results always carry the label "current S&P 500 constituents (survivorship-biased)" (spec ids starting `stocks_`).
+- Portfolios tripped before A18 will auto re-arm after 20 bars. Moot today, since no live portfolios exist.
+
 ## Consequences
 - **One loop (`BarDriver`) and one engine** mean a backtest result and a paper result for the same bars must match exactly. SPEC-005 can test that directly.
 - **Synthetic fixtures** keep the public repo clean and the goldens stable, but CI never sees real market data. Real-data sanity checks are a manual, local step before any strategy passes the gate.

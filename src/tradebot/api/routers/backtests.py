@@ -46,6 +46,16 @@ def check_overrides(v: dict[str, Any]) -> None:
         exp = cap.as_tuple().exponent
         if not cap.is_finite() or cap <= 0 or (isinstance(exp, int) and exp < -2):
             raise ValueError("initial_capital must be a positive amount in whole cents")
+    for key in ("kill_switch", "vol_scaled"):
+        if key in v and not isinstance(v[key], bool):
+            raise ValueError(f"{key} must be true or false")
+    for key in ("max_asset_fraction", "max_crypto_fraction"):
+        if key in v:
+            x = v[key]
+            if isinstance(x, bool) or not isinstance(x, (int, float)):
+                raise ValueError(f"{key} must be a number")
+            if not math.isfinite(x) or not 0.0 < x <= 1.0:
+                raise ValueError(f"{key} must be a finite number in (0, 1]")
     if "rf_annual" in v:
         rf = v["rf_annual"]
         if isinstance(rf, bool) or not isinstance(rf, (int, float)):

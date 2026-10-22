@@ -30,7 +30,16 @@ from tradebot.db.models import BacktestEquityPoint, BacktestRun, BacktestTrade, 
 
 log = logging.getLogger(__name__)
 
-ALLOWED_OVERRIDES = frozenset({"rf_annual", "initial_capital"})
+ALLOWED_OVERRIDES = frozenset(
+    {
+        "rf_annual",
+        "initial_capital",
+        "kill_switch",
+        "max_asset_fraction",
+        "max_crypto_fraction",
+        "vol_scaled",
+    }
+)
 WARMUP_DAYS = 1100  # calendar days of history before ``start`` (SMA200 / ret126 warm-up)
 
 DataFactory = Callable[[], MarketData]
@@ -138,28 +147,65 @@ class BacktestOutcome:
     benchmark: str
 
 
+def strategy_max_weight(spec: Any) -> Decimal:
+    """Largest fraction of the fund one symbol of ``spec`` can hold by its own design (ADR A16).
+
+    Rotation: ``1/top_n`` (``1`` when a fallback symbol can fill every empty slot). Rules: its
+    fixed weight, or ``1/len(universe)`` for ``equal``.
+    """
+    resolved = spec.resolve()
+    if resolved.kind == "rotation":
+        if resolved.fallback is not None:
+            return Decimal(1)
+        return Decimal(1) / Decimal(int(resolved.select.top))
+    w = resolved.position.weight
+    if isinstance(w, (int, float)) and not isinstance(w, bool):
+        return min(Decimal(1), Decimal(repr(float(w))))
+    return Decimal(1) / Decimal(max(1, len(resolved.universe)))
+
+
 def single_sleeve_config(spec: Any, start: date, end: date, over: dict[str, Any]) -> Any:
-    """A ``BacktestConfig`` with ``spec`` as the one sleeve holding 100% of the fund."""
+    """A ``BacktestConfig`` with ``spec`` as the one sleeve holding 100% of the fund.
+
+    Caps suit one strategy, not the whole fund (ADR A16): per-asset cap is the strategy's own
+    max weight, no crypto cap. Overrides: ``max_asset_fraction``, ``max_crypto_fraction``,
+    ``vol_scaled`` (default True), ``kill_switch`` (default True; False disables it).
+    """
     from tradebot.backtest.engine import BacktestConfig, SleeveSpec
     from tradebot.data.types import AssetClass
     from tradebot.portfolio.config import SleeveConfig, default_config
+    from tradebot.risk.config import RiskConfig
 
     cls = AssetClass.CRYPTO if spec.asset_class == "crypto" else AssetClass.EQUITY
     sleeve = SleeveConfig(
         sleeve_id=spec.id,
         name=spec.id,
         target_weight=Decimal(1),
-        vol_scaled=True,
+        vol_scaled=bool(over.get("vol_scaled", True)),
         allowed_asset_classes=frozenset({cls}),
     )
-    upd: dict[str, Any] = {"sleeves": (sleeve,)}
+    base = default_config()
+    asset_cap = (
+        Decimal(str(over["max_asset_fraction"]))
+        if "max_asset_fraction" in over
+        else (strategy_max_weight(spec))
+    )
+    crypto_cap = Decimal(str(over.get("max_crypto_fraction", 1)))
+    kill = Decimal("0.20") if over.get("kill_switch", True) else Decimal(1)
+    risk = RiskConfig(
+        max_asset_fraction=asset_cap,
+        max_crypto_fraction=crypto_cap,
+        kill_switch_drawdown=kill,
+        max_pending_bars=base.risk.max_pending_bars,
+    )
+    upd: dict[str, Any] = {"sleeves": (sleeve,), "risk": risk}
     if "initial_capital" in over:
         upd["initial_capital"] = Decimal(str(over["initial_capital"]))
     return BacktestConfig(
         sleeves=[SleeveSpec(sleeve_id=spec.id, strategy=spec)],
         start=start,
         end=end,
-        engine=default_config().model_copy(update=upd),
+        engine=base.model_copy(update=upd),
         rf_annual=float(over.get("rf_annual", 0.0)),
     )
 
@@ -177,6 +223,11 @@ def compute_backtest(
     bars = {str(k): v for k, v in got.items()}
     report = run_with_benchmark(cfg, bars)
     payload = json.loads(report.to_json())
+    from tradebot.data.universe import SP500_LABEL, is_sp500_spec
+
+    payload["killed_dates"] = [d.isoformat() for d in report.result.killed_dates]
+
+    payload["caveats"] = [SP500_LABEL] if is_sp500_spec(spec.id) else []
     if mode != "single":
         from tradebot.backtest.validation import run_validation
 

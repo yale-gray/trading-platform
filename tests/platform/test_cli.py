@@ -199,7 +199,9 @@ def spy(cli_db: Engine, offline: Path) -> Engine:
 @pytest.fixture
 def tripped(cli_db: Engine, offline: Path) -> Engine:
     hair = default_config().model_copy(
-        update={"risk": RiskConfig(kill_switch_drawdown=Decimal("0.0005"))}
+        update={
+            "risk": RiskConfig(kill_switch_drawdown=Decimal("0.0005"), kill_switch_pause_bars=1000)
+        }
     )
     seed(cli_db, [fund_definition(START, data_start=DATA_START, engine=hair, benchmark=None)])
     make_runner(cli_db, make_data(offline)).tick(NOW)
@@ -320,6 +322,23 @@ def test_backtest_run_prints_metrics_and_saves(offline: Path, cli_db: Engine, ca
     with session_scope(cli_db) as s:
         run = s.exec(select(BacktestRun)).one()
         assert run.status == "done" and run.benchmark_symbol == "SPY" and run.result_json
+
+
+def test_backtest_run_prints_the_survivorship_label_for_sp500_strategies(
+    offline: Path, cli_db: Engine, capsys: Any, tmp_path: Path
+) -> None:
+    from tradebot.data.universe import SP500_LABEL
+
+    text = (STRATEGIES_DIR / "core_momentum.yaml").read_text()
+    argv = ["--start", "2019-01-02", "--end", "2019-06-28"]
+    plain = tmp_path / "core_momentum.yaml"
+    plain.write_text(text)
+    assert cli.main(["backtest", "run", str(plain), *argv]) == 0
+    assert SP500_LABEL not in capsys.readouterr().out
+    stocks = tmp_path / "stocks_probe.yaml"
+    stocks.write_text(text.replace("id: core_momentum", "id: stocks_probe"))
+    assert cli.main(["backtest", "run", str(stocks), *argv]) == 0
+    assert SP500_LABEL in capsys.readouterr().out
 
 
 def test_api_serve_starts_uvicorn_on_the_configured_host(

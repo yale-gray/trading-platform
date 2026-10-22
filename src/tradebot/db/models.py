@@ -264,7 +264,7 @@ class KillSwitchState(SQLModel, table=True):
 
 
 class KillSwitchEvent(SQLModel, table=True):
-    """Audit log: ``trip`` / ``ack`` / ``reset`` (reset rows are written by the CLI only)."""
+    """Audit log: ``trip`` / ``ack`` / ``reset`` / ``rearm`` (``reset``: CLI only)."""
 
     __tablename__ = "kill_switch_event"
     id: int | None = Field(default=None, primary_key=True)

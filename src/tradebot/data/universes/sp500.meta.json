@@ -1,0 +1,6 @@
+{
+  "source_url": "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+  "snapshot_date": "2026-10-21",
+  "columns": ["ticker", "name", "sector", "date_added"],
+  "survivorship": "current constituents only (survivorship-biased). The page no longer exposes a historical add/remove changes table, so no point-in-time membership of removed names is available. date_added is the date the company joined the index (may be blank/approximate)."
+}

@@ -489,10 +489,10 @@ def mirror_kill_switch(
     events: Sequence[str],
     now: datetime,
 ) -> None:
-    """Copy the engine's kill-switch state; log ``trip`` / ``reset`` audit rows.
+    """Copy the engine's kill-switch state; log ``trip`` / ``reset`` / ``rearm`` audit rows.
 
     ``events`` holds the ledger event types of this bar (``KILL_SWITCH_TRIPPED`` /
-    ``KILL_SWITCH_RESET``). A trip clears any earlier acknowledgement.
+    ``KILL_SWITCH_RESET`` / ``KILL_SWITCH_REARMED``). A trip clears any earlier acknowledgement.
     """
     row = session.get(KillSwitchState, portfolio_id)
     if row is None:
@@ -511,6 +511,16 @@ def mirror_kill_switch(
         session.add(
             KillSwitchEvent(
                 portfolio_id=portfolio_id, ts=now, kind="reset", note=str(bar_ts.date())
+            )
+        )
+    if "KILL_SWITCH_REARMED" in events:
+        row.tripped_at_bar = None
+        row.trigger_drawdown = None
+        row.acknowledged_at = None
+        row.ack_note = None
+        session.add(
+            KillSwitchEvent(
+                portfolio_id=portfolio_id, ts=now, kind="rearm", note=str(bar_ts.date())
             )
         )
     row.tripped = tripped

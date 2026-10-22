@@ -89,6 +89,7 @@ class BacktestResult(BaseModel):
     trades: list[ClosedTrade]
     open_positions: list[OpenPosition]
     killed_on: date | None
+    killed_dates: list[date] = []  # every trip (killed_on is the first); not in to_json
     ledger: list[LedgerEvent]
     n_signals: int
 
@@ -103,6 +104,11 @@ class BacktestReport(BaseModel):
     benchmark_metrics: dict[str, Metrics]
     benchmark_equity: dict[str, pd.Series]
     deltas: dict[str, dict[str, float]]  # fund minus benchmark, per benchmark
+
+    @property
+    def killed_on(self) -> date | None:
+        """Date the kill switch tripped, or ``None`` (already in ``to_json`` as ``killed_on``)."""
+        return self.result.killed_on
 
     def to_json(self) -> str:
         """Canonical JSON (sorted keys, NaN -> null): byte-identical for identical inputs."""
@@ -280,6 +286,7 @@ def run_backtest(cfg: BacktestConfig, bars: Mapping[str, pd.DataFrame]) -> Backt
         trades=closed_trades(engine.ledger, orders),
         open_positions=open_positions(snaps[-1]),
         killed_on=killed_on,
+        killed_dates=[s.asof for s in steps if s.bar_result.kill_switch_tripped],
         ledger=list(engine.ledger),
         n_signals=sum(len(s.signals) for s in steps),
     )

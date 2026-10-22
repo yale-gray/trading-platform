@@ -1,0 +1,12 @@
+schema_version: 1
+id: index_hold
+name: Index buy-and-hold (SPY + QQQ, 50/50)
+kind: rules
+asset_class: equity
+description: >
+  ADR-0001 A17. Always in the market: 50% SPY and 50% QQQ of the sleeve, no stops, no exits.
+  Drift is corrected by the account's monthly rebalance. Run with sleeve vol_scaled = false.
+universe: [SPY, QQQ]
+schedule: {freq: daily}
+entry: {always: true}
+position: {weight: 0.5}

@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from tradebot.config import Settings
     from tradebot.data import MarketData
 
-PRESETS = ("fund", "bench_spy", "bench_btc")
+PRESETS = ("fund", "smart", "bench_spy", "bench_btc")
 MODES = ("single", "walk_forward", "sensitivity")
 
 
@@ -156,8 +156,13 @@ def _cmd_portfolio_create(args: argparse.Namespace) -> int:
     from sqlalchemy.exc import IntegrityError
 
     from tradebot.db import session_scope
-    from tradebot.runner import benchmark_definition, create_portfolio, fund_definition
-    from tradebot.runner.state import PortfolioDef
+    from tradebot.runner import (
+        benchmark_definition,
+        create_portfolio,
+        fund_definition,
+        smart_definition,
+    )
+    from tradebot.runner.state import PortfolioDef, RunnerError
 
     if bool(args.preset) == bool(args.config):
         return _err("give exactly one of --preset or --config FILE")
@@ -169,11 +174,15 @@ def _cmd_portfolio_create(args: argparse.Namespace) -> int:
         symbol = {"bench_spy": "SPY", "bench_btc": "BTC/USD"}.get(args.preset)
         markets = ["equity"] if symbol == "SPY" else ["crypto"] if symbol else ["crypto", "equity"]
         start = start or _latest_complete_bar(markets, now, settings.equity_close_delay_min)
-        defn = (
-            fund_definition(start, name=args.name or "paper_fund")
-            if symbol is None
-            else benchmark_definition(symbol, start, name=args.name)
-        )
+        if symbol is not None:
+            defn = benchmark_definition(symbol, start, name=args.name)
+        elif args.preset == "smart":
+            try:
+                defn = smart_definition(start, name=args.name or "smart_investing")
+            except RunnerError as exc:
+                return _err(str(exc))
+        else:
+            defn = fund_definition(start, name=args.name or "paper_fund")
     else:
         defn = PortfolioDef.from_json(Path(args.config).read_text(encoding="utf-8"))
         if args.name:
@@ -191,6 +200,10 @@ def _cmd_portfolio_create(args: argparse.Namespace) -> int:
     finally:
         engine.dispose()
     print(f"created portfolio {defn.name!r} (id {pid}, {defn.kind}) starting {defn.start}")
+    if args.preset == "smart":
+        from tradebot.runner.bootstrap import SMART_DESCRIPTION
+
+        print(SMART_DESCRIPTION)
     return 0
 
 
@@ -343,19 +356,40 @@ def _cmd_backtest_run(args: argparse.Namespace) -> int:
     settings = _settings()
     spec = load_strategy(Path(args.strategy_file))
     end = args.end or _now().date()
-    outcome = compute_backtest(spec, args.start, end, {}, args.mode, _market_data(settings))
-    m = outcome.report.metrics
-    rows = [
-        ("total_return", f"{m.total_return:.2%}"),
-        ("cagr", f"{m.cagr:.2%}"),
-        ("max_drawdown", f"{m.max_drawdown:.2%}"),
-        ("sharpe", f"{m.sharpe:.2f}"),
-        ("sortino", f"{m.sortino:.2f}"),
-        ("trades", m.trade_count),
-    ]
+    data = _market_data(settings)
+    ks = args.kill_switch
+    over_on: dict[str, Any] = {"kill_switch": True}
+    over_off: dict[str, Any] = {"kill_switch": False}
+    outcome = compute_backtest(
+        spec, args.start, end, over_off if ks == "off" else over_on, args.mode, data
+    )
+    other = None
+    if ks == "both":
+        other = compute_backtest(spec, args.start, end, over_off, "single", data)
+
+    def _col(o: Any) -> list[str]:
+        m = o.report.metrics
+        k = o.report.killed_on
+        return [
+            f"{m.total_return:.2%}",
+            f"{m.cagr:.2%}",
+            f"{m.max_drawdown:.2%}",
+            f"{m.sharpe:.2f}",
+            f"{m.sortino:.2f}",
+            str(m.trade_count),
+            k.isoformat() if k else "-",
+        ]
+
+    names = ["total_return", "cagr", "max_drawdown", "sharpe", "sortino", "trades", "killed_on"]
+    cols = [_col(outcome)] + ([_col(other)] if other is not None else [])
+    heads = ["kill-switch on", "kill-switch off"] if ks == "both" else [f"kill-switch {ks}"]
+    rows = [(n, *(c[i] for c in cols)) for i, n in enumerate(names)]
     for sym, bm in sorted(outcome.report.benchmark_metrics.items()):
-        rows.append((f"{sym} total_return", f"{bm.total_return:.2%}"))
-    print(_table(rows, ("metric", "value")))
+        rows.append((f"{sym} total_return", *([f"{bm.total_return:.2%}"] * len(cols))))
+        rows.append((f"{sym} cagr", *([f"{bm.cagr:.2%}"] * len(cols))))
+    print(_table(rows, ("metric", *heads)))
+    for caveat in outcome.payload.get("caveats", []):
+        print(f"note: universe = {caveat}")
     if args.mode != "single":
         gate = outcome.payload.get("validation", {})
         print(
@@ -387,7 +421,7 @@ def _cmd_backtest_run(args: argparse.Namespace) -> int:
                             "start": args.start.isoformat(),
                             "end": end.isoformat(),
                             "mode": args.mode,
-                            "overrides": {},
+                            "overrides": over_off if ks == "off" else over_on,
                         },
                         sort_keys=True,
                     ),
@@ -485,6 +519,12 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--start", type=_date, required=True)
     c.add_argument("--end", type=_date)
     c.add_argument("--mode", choices=MODES, default="single")
+    c.add_argument(
+        "--kill-switch",
+        choices=("on", "off", "both"),
+        default="both",
+        help="kill-switch setting to run; 'both' prints on and off side by side (default)",
+    )
     c.add_argument("--save", action="store_true", help="store a backtest_run row")
     c.set_defaults(func=_cmd_backtest_run)
 

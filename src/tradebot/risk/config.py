@@ -27,6 +27,7 @@ class RiskConfig(BaseModel):
     max_crypto_fraction: Decimal = Decimal("0.30")
     kill_switch_drawdown: Decimal = Decimal("0.20")
     max_pending_bars: int = 5
+    kill_switch_pause_bars: int = 20  # ADR A18: BUY pause after a trip, then auto re-arm
 
     @field_validator(
         "max_asset_fraction", "max_crypto_fraction", "kill_switch_drawdown", mode="before"
@@ -42,9 +43,9 @@ class RiskConfig(BaseModel):
             raise ValueError(f"limit must be > 0 and <= 1, got {value}")
         return value
 
-    @field_validator("max_pending_bars")
+    @field_validator("max_pending_bars", "kill_switch_pause_bars")
     @classmethod
     def _positive_int(cls, value: int) -> int:
         if value < 1:
-            raise ValueError(f"max_pending_bars must be >= 1, got {value}")
+            raise ValueError(f"value must be >= 1, got {value}")
         return value

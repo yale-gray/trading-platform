@@ -1,4 +1,4 @@
-"""Portfolio detail page: charts, positions, trades, sleeves and the kill-switch panel."""
+"""Portfolio detail page: charts, sleeves, sections (index / stocks / crypto), kill switch."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import streamlit as st
 
 from dashboard import client
 from dashboard.views import common
+from tradebot.data.universe import SP500_LABEL
 
 TRADES_PAGE_SIZE = 50
 
@@ -49,9 +50,8 @@ def render() -> None:
     common.explain(_EXPLAINER)
     _summary(detail)
     _equity_charts(pid, detail)
-    _positions(pid)
-    _trades(pid)
     _sleeves(detail)
+    _sections(pid, detail)
     _kill_switch(pid, detail)
 
 
@@ -112,12 +112,90 @@ def _equity_charts(pid: int, detail: dict) -> None:
     st.plotly_chart(dd_fig)
 
 
-def _positions(pid: int) -> None:
-    st.subheader("Open positions")
-    st.caption("A **position** is a holding the portfolio owns right now.")
-    rows = common.fetch(client.get_positions, pid)
-    if rows is None:
+SECTIONS: tuple[tuple[str, frozenset[str]], ...] = (
+    ("Index funds", frozenset({"index", "core_momentum", "mean_reversion"})),
+    ("Stocks", frozenset({"stocks"})),
+    ("Crypto", frozenset({"crypto", "crypto_trend"})),
+)
+"""Dashboard sections by sleeve key. Keys in no section are listed under "Other"."""
+
+OTHER = "Other"
+SP500_NOTE = f"Stock universe: {SP500_LABEL}."
+DAY_TRADING_NOTE = "Coming once the Alpaca data key is set up."
+
+
+def section_of(sleeve_key: str) -> str:
+    """The section title a sleeve belongs to (``OTHER`` when it matches none)."""
+    for title, keys in SECTIONS:
+        if sleeve_key in keys:
+            return title
+    return OTHER
+
+
+def _sections(pid: int, detail: dict) -> None:
+    """Positions, trades and sleeve charts grouped by section (Index / Stocks / Crypto)."""
+    positions = common.fetch(client.get_positions, pid)
+    page = int(
+        st.number_input("Trades page", min_value=1, value=1, step=1, key=f"trade_page_{pid}")
+    )
+    trades = common.fetch(
+        client.get_trades, pid, limit=TRADES_PAGE_SIZE, offset=(page - 1) * TRADES_PAGE_SIZE
+    )
+    if positions is None or trades is None:
         return
+    st.caption(
+        "A **position** is a holding the portfolio owns right now. A **trade** is one completed "
+        f"buy or sell, newest first ({trades['total']} in total, page {page})."
+    )
+    sleeves = detail.get("sleeves", [])
+    titles = [t for t, _ in SECTIONS] + [OTHER]
+    for title in titles:
+        mine = [s for s in sleeves if section_of(s["key"]) == title]
+        pos = [r for r in positions if section_of(r["sleeve_key"]) == title]
+        trd = [t for t in trades["items"] if section_of(t["sleeve_key"]) == title]
+        if title == OTHER and not (pos or trd):
+            continue  # nothing unclassified: stay quiet
+        st.header(title)
+        if title == "Stocks":
+            st.caption(SP500_NOTE)
+        if not mine and not pos and not trd:
+            st.info(f"This portfolio has no {title.lower()} sleeve.")
+            continue
+        _section_chart(pid, title, mine)
+        _positions_table(pos)
+        _trades_table(trd)
+    st.header("Day trading")
+    st.info(DAY_TRADING_NOTE)
+
+
+def _section_chart(pid: int, title: str, sleeves: list[dict]) -> None:
+    fig = go.Figure()
+    for sl in sleeves:
+        points = common.fetch(client.get_equity, pid, sleeve=sl["key"])
+        if not points:
+            continue
+        df = pd.DataFrame(points)
+        fig.add_trace(
+            go.Scatter(
+                x=df["ts"],
+                y=common.rebased(list(df["equity"])),
+                name=sl["strategy_name"] or sl["key"],
+                mode="lines",
+            )
+        )
+    if not fig.data:
+        st.caption("No equity history for this section yet.")
+        return
+    fig.update_layout(
+        title=f"{title}: growth of each sleeve (starts at 100)",
+        height=280,
+        margin=dict(l=10, r=10, t=50, b=10),
+    )
+    st.plotly_chart(fig, key=f"section_chart_{pid}_{title}")
+
+
+def _positions_table(rows: list[dict]) -> None:
+    st.subheader("Open positions")
     if not rows:
         st.info("No open positions.")
         return
@@ -141,17 +219,9 @@ def _positions(pid: int) -> None:
     )
 
 
-def _trades(pid: int) -> None:
+def _trades_table(rows: list[dict]) -> None:
     st.subheader("Trades")
-    st.caption("A **trade** is one completed buy or sell, newest first.")
-    page = int(st.number_input("Page", min_value=1, value=1, step=1, key=f"trade_page_{pid}"))
-    data = common.fetch(
-        client.get_trades, pid, limit=TRADES_PAGE_SIZE, offset=(page - 1) * TRADES_PAGE_SIZE
-    )
-    if data is None:
-        return
-    st.caption(f"{data['total']} trades in total. Page {page}.")
-    if not data["items"]:
+    if not rows:
         st.info("No trades on this page.")
         return
     st.dataframe(
@@ -168,7 +238,7 @@ def _trades(pid: int) -> None:
                     "Slippage cost": common.money(t["slippage"]),
                     "Reason": t["reason"],
                 }
-                for t in data["items"]
+                for t in rows
             ]
         ),
         hide_index=True,
@@ -222,12 +292,13 @@ def _kill_switch(pid: int, detail: dict) -> None:
     if ks["tripped"]:
         st.error(
             f"The kill switch has TRIPPED (tripped at {common.fmt_ts(ks['tripped_at_bar'])}). "
-            "New trades are stopped until it is reset from the command line."
+            "New buys are paused for a set number of bars, then the switch re-arms by itself "
+            "(selling is still allowed). It can be reset early from the command line."
         )
     else:
         st.success("Not tripped. Trading is allowed.")
     st.caption(
-        f"Limit: losses beyond {common.pct(ks['threshold_pct'])} from the high stop trading."
+        f"Limit: losses beyond {common.pct(ks['threshold_pct'])} from the high pause new buys."
     )
     if ks["acknowledged_at"]:
         st.caption(

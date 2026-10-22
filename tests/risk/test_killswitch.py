@@ -7,7 +7,7 @@ Every expected number below is worked out by hand in a comment.
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -51,20 +51,60 @@ def test_reported_drawdown_is_one_minus_equity_over_peak() -> None:
     assert obs.killed is False
 
 
-def test_trip_is_sticky_after_recovery_and_blocks_buys() -> None:
-    # Trip at 79000 (drawdown 21%). Recovery to 100000 (back at the peak) must not clear it.
-    ks = KillSwitch(CAP)
-    first = ks.observe(D("79000.00"), D1)
-    assert first.tripped_now is True
+def test_trip_is_sticky_for_n_bars_even_after_recovery_and_blocks_buys() -> None:
+    # Trip at 79000 (drawdown 21%). With a 3-bar pause, recovery to the old peak must not
+    # clear it on bars 1 and 2 after the trip; the 3rd bar after the trip re-arms.
+    ks = KillSwitch(CAP, pause_bars=3)
+    assert ks.observe(D("79000.00"), D1).tripped_now is True
 
     recovered = ks.observe(D("100000.00"), D2)
-    assert recovered.killed is True
-    assert recovered.tripped_now is False
+    assert recovered.killed is True and recovered.tripped_now is False
     assert ks.allows_buy() is False
     assert ks.rebalance_frozen is True
 
     still = ks.observe(D("99000.00"), D3)
-    assert still.killed is True
+    assert still.killed is True and still.rearmed_now is False
+    assert ks.peak_equity == CAP  # peak is frozen during the pause
+
+
+def test_rearms_after_pause_bars_with_peak_at_current_equity() -> None:
+    ks = KillSwitch(CAP, pause_bars=3)
+    ks.observe(D("79000.00"), D1)
+    ks.observe(D("80000.00"), D2)
+    ks.observe(D("81000.00"), D3)
+    obs = ks.observe(D("82000.00"), date(2024, 1, 5))  # 3rd bar after the trip
+    assert obs.rearmed_now is True and obs.killed is False and obs.tripped_now is False
+    assert obs.peak_equity == D("82000.00") == ks.peak_equity
+    assert ks.allows_buy() is True and ks.tripped_asof is None
+    # Next trip is measured from the new peak: 82000 * 0.8 = 65600.
+    assert ks.observe(D("65601.00"), date(2024, 1, 6)).killed is False
+    assert ks.observe(D("65600.00"), date(2024, 1, 7)).tripped_now is True
+
+
+def test_pause_of_twenty_bars_by_default() -> None:
+    ks = KillSwitch(CAP)
+    assert ks.pause_bars == 20
+    ks.observe(D("70000.00"), D1)
+    for i in range(19):
+        assert ks.observe(D("70000.00"), D2 + timedelta(days=i)).killed is True
+    assert ks.observe(D("70000.00"), D2 + timedelta(days=19)).rearmed_now is True
+
+
+def test_pause_bars_must_be_positive() -> None:
+    with pytest.raises(ValueError, match="pause_bars"):
+        KillSwitch(CAP, pause_bars=0)
+
+
+def test_manual_reset_ends_the_pause_early() -> None:
+    ks = KillSwitch(CAP, pause_bars=20)
+    ks.observe(D("70000.00"), D1)
+    ks.observe(D("71000.00"), D2)
+    ks.reset("op", "early", D3)
+    assert ks.killed is False and ks.bars_paused == 0
+    assert ks.peak_equity == D("71000.00")
+    # a later re-trip starts a fresh pause count
+    ks.observe(D("56800.00"), date(2024, 1, 5))
+    assert ks.killed is True and ks.bars_paused == 0
 
 
 def test_running_peak_rises_above_initial_capital() -> None:
@@ -138,7 +178,7 @@ def test_reset_clears_trip_and_rebases_peak_to_last_equity() -> None:
 
 def test_state_round_trip_preserves_killed_and_peak() -> None:
     # threshold 0.15: trip iff equity <= 120000 * 0.85 = 102000. Equity 100000 trips.
-    ks = KillSwitch(CAP, threshold=D("0.15"))
+    ks = KillSwitch(CAP, threshold=D("0.15"), pause_bars=5)
     ks.observe(D("120000.00"), D1)
     ks.observe(D("100000.00"), D2)
     assert ks.killed is True
@@ -151,9 +191,25 @@ def test_state_round_trip_preserves_killed_and_peak() -> None:
     assert restored.threshold == D("0.15")
     assert restored.tripped_asof == D2
     assert restored.last_equity == D("100000.00")
+    assert restored.pause_bars == 5 and restored.bars_paused == 0
 
     # Restored switch stays tripped and does not re-trip on the next bar.
     again = restored.observe(D("130000.00"), D3)
     assert again.killed is True
     assert again.tripped_now is False
-    assert again.peak_equity == D("130000.00")
+    assert again.peak_equity == D("120000.00")  # peak is frozen while paused
+    assert restored.bars_paused == 1
+
+
+def test_state_saved_before_a18_restores_with_defaults() -> None:
+    old = {
+        "threshold": "0.20",
+        "peak_equity": "100000.00",
+        "last_equity": "79000.00",
+        "killed": True,
+        "tripped_asof": "2024-01-02",
+        "resets": [],
+    }
+    ks = KillSwitch.from_state(old, default_pause_bars=7)
+    assert ks.killed is True and ks.pause_bars == 7 and ks.bars_paused == 0
+    assert KillSwitch.from_state(old).pause_bars == 20

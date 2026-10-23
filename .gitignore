@@ -15,3 +15,7 @@ data/cache/
 web/node_modules/
 web/dist/
 logs/
+runner.lock
+*.lock
+!uv.lock
+!web/package-lock.json

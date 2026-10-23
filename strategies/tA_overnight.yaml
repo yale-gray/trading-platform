@@ -1,0 +1,22 @@
+schema_version: 1
+id: tA_overnight
+name: SPY/QQQ overnight hold (buy near the close, sell at the open)
+description: >-
+  Buy SPY and QQQ at the 15:45 bar's open and sell them at the next session's 09:30 open, every day.
+kind: rules
+asset_class: equity
+timeframe: 15m
+# PRE-REGISTERED Tier A batch "tierA-2026-10" (docs/research/tierA-preregistration-2026-10.md),
+# written and committed BEFORE any backtest of this id. Development data 2016-2023 only; 2024+ is
+# the sealed hold-out (ADR A25). Do not tune on results; a changed number is a new strategy id.
+# Basis: overnight vs intraday return decomposition (Kelly & Clark 2011; Lou, Polk & Skouras 2019).
+# Clock-only rule (ADR A28, lag 0): entry decided on bar 24 fills at bar 25's open (15:45); exit decided
+# on bar 25 fills at the next session's first open (09:30). Needs a SWING account (no flatten, A27).
+# Bar indices are literals on purpose (A30/M7): gate 5 sensitivity is uninformative for this rule.
+schedule: {freq: bar}
+entry:
+  eq: [{session: bar_index}, 24]
+exit:
+  eq: [{session: bar_index}, 25]
+position: {weight: equal}
+universe: ["SPY", "QQQ"]

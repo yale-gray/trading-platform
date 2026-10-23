@@ -1,0 +1,26 @@
+schema_version: 1
+id: tA_noise_momentum
+name: SPY noise-band intraday momentum (long only)
+description: >-
+  Buy SPY when it breaks above its usual intraday range for that time of day; sell when it falls back
+  below the band or below the day's VWAP, or at the close.
+kind: rules
+asset_class: equity
+timeframe: 15m
+# PRE-REGISTERED Tier A batch "tierA-2026-10" (docs/research/tierA-preregistration-2026-10.md),
+# written and committed BEFORE any backtest of this id. Development data 2016-2023 only; 2024+ is
+# the sealed hold-out (ADR A25). Do not tune on results; a changed number is a new strategy id.
+# Basis: Zarattini, Aziz & Barbon 2024 "Beat the Market" (SPY; long side only, no leverage, no vol
+# targeting; the paper uses 1-min data checked every 30 min, here every 15m bar with the A22 lag of 2).
+# Band = open x (1 + mean |move from open at this time of day| over the last 14 sessions) (A29).
+# Needs a flatten-at-close account.
+parameters: {band_days: 14}
+schedule: {freq: bar}
+entry:
+  gt: [{price: close}, {ind: noise_upper, period: $band_days}]
+exit:
+  any:
+    - lt: [{price: close}, {ind: noise_upper, period: $band_days}]
+    - lt: [{price: close}, {session: vwap}]
+position: {weight: equal}
+universe: ["SPY"]

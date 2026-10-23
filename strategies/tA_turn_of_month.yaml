@@ -1,0 +1,21 @@
+schema_version: 1
+id: tA_turn_of_month
+name: SPY turn-of-the-month
+description: >-
+  Hold SPY from the last trading day of the month to the 3rd trading day of the next month.
+kind: rules
+asset_class: equity
+# PRE-REGISTERED Tier A batch "tierA-2026-10" (docs/research/tierA-preregistration-2026-10.md),
+# written and committed BEFORE any backtest of this id. Development data 2016-2023 only; 2024+ is
+# the sealed hold-out (ADR A25). Do not tune on results; a changed number is a new strategy id.
+# Basis: Ariel 1987; Lakonishok & Smidt 1988; McConnell & Xu 2008.
+# Clock-only daily rule (lag 0): decided at the close of the 2nd-to-last trading day, filled at the
+# last day's open; exit decided at the 3rd trading day's close, filled at the 4th day's open.
+# Literals on purpose (A30/M7).
+schedule: {freq: daily}
+entry:
+  eq: [{calendar: tdays_to_month_end}, 1]
+exit:
+  eq: [{calendar: tday_of_month}, 3]
+position: {weight: equal}
+universe: ["SPY"]

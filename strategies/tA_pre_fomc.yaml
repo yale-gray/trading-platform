@@ -1,0 +1,27 @@
+schema_version: 1
+id: tA_pre_fomc
+name: SPY pre-FOMC drift
+description: >-
+  Hold SPY for the 24 hours before each scheduled Fed announcement (13:45 the day before to 13:45 on
+  the announcement day).
+kind: rules
+asset_class: equity
+timeframe: 15m
+# PRE-REGISTERED Tier A batch "tierA-2026-10" (docs/research/tierA-preregistration-2026-10.md),
+# written and committed BEFORE any backtest of this id. Development data 2016-2023 only; 2024+ is
+# the sealed hold-out (ADR A25). Do not tune on results; a changed number is a new strategy id.
+# Basis: Lucca & Moench 2015 (reported to have faded after 2015: Kurov, Wolfe & Gilbert 2021).
+# Clock-only (lag 0): entry decided on bar 16 (13:30) the trading day before the statement, filled at
+# 13:45; exit decided on bar 16 of statement day, filled at 13:45, before the 14:00 release (audit 008).
+# Scheduled meetings only (src/tradebot/data/events/fomc.csv). Needs a SWING account. Literals on purpose.
+schedule: {freq: bar}
+entry:
+  all:
+    - eq: [{event: fomc, field: tdays_until}, 1]
+    - eq: [{session: bar_index}, 16]
+exit:
+  all:
+    - eq: [{event: fomc, field: tdays_until}, 0]
+    - eq: [{session: bar_index}, 16]
+position: {weight: equal}
+universe: ["SPY"]

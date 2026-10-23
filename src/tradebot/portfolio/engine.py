@@ -8,19 +8,28 @@ wall clock; iteration is sorted and arithmetic runs in ``money_context()``.
 Per bar ``process_bar(asof, bars)`` runs, in this order: A fill at the open, B
 mark at the close, C rebalance transfers, D stops, E snapshot + kill switch,
 F rebalance decision. Then the caller may ``submit_target_weights``.
+
+Day-trading accounts (ADR-0001 A21): ``asof`` is then a UTC ``datetime`` (bar open) instead
+of a ``date`` (see :mod:`tradebot.portfolio.asof`); with ``EngineConfig.intraday_flatten`` a
+``session_end=True`` bar sells every position at its close right after step B; with
+``EngineConfig.settlement == "t1"`` SELL proceeds fund BUYs only from the next trading day;
+and ``process_bar(..., lean=True)`` converts and marks only held and pending symbols (bars of
+targeted symbols are pulled on demand by ``submit_target_weights``), which keeps a 500-symbol
+intraday run tractable. Daily runs use none of this and are unchanged.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
 from tradebot.data.symbols import normalize_symbol
 from tradebot.data.types import AssetClass
+from tradebot.portfolio.asof import AsOf, asof_key
 from tradebot.portfolio.config import EngineConfig, SleeveConfig, sleeve_deposits
 from tradebot.portfolio.ledger import Ledger, LedgerError
 from tradebot.portfolio.models import (
@@ -109,7 +118,7 @@ class BarResult(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    asof: date
+    asof: AsOf
     fills: list[Order]
     stop_orders: list[Order]
     expired: list[Order]
@@ -141,6 +150,8 @@ class PortfolioEngine:
     def __init__(self, config: EngineConfig, state: EngineState | None = None) -> None:
         self._config = config
         self._asset_class_of = default_asset_class
+        self._cur_bars: Mapping[str, Bar] | None = None  # lean mode: this bar's full bar map
+        self._fresh: set[str] = set()  # symbols marked on the current bar (lean mode)
         if state is None:
             self._init_fresh()
         else:
@@ -152,7 +163,9 @@ class PortfolioEngine:
 
     def _init_fresh(self) -> None:
         cfg = self._config
-        self._ledger = Ledger(equity_qty_quantum=cfg.equity_qty_quantum)
+        self._ledger = Ledger(
+            equity_qty_quantum=cfg.equity_qty_quantum, t1_settlement=cfg.settlement == "t1"
+        )
         self._portfolio = Portfolio(self._ledger)
         self._ids = OrderIdGenerator()
         self._broker = SimBroker(
@@ -164,7 +177,7 @@ class PortfolioEngine:
         )
         self._episode: dict[tuple[str, str], int] = {}
         self._next_transfer_n = 0
-        self._last_asof: date | None = None
+        self._last_asof: AsOf | None = None
         self._last_rebalance_month: str | None = None
         self._plan: RebalancePlan | None = None
         self._last_close: dict[str, Decimal] = {}
@@ -182,7 +195,11 @@ class PortfolioEngine:
     def _init_from_state(self, state: EngineState) -> None:
         cfg = self._config
         try:
-            self._ledger = Ledger(state.ledger, equity_qty_quantum=cfg.equity_qty_quantum)
+            self._ledger = Ledger(
+                state.ledger,
+                equity_qty_quantum=cfg.equity_qty_quantum,
+                t1_settlement=cfg.settlement == "t1",
+            )
         except LedgerError as exc:
             raise StateCorruptionError(f"ledger does not replay: {exc}") from exc
         if state.next_seq != len(self._ledger) + 1:
@@ -203,6 +220,15 @@ class PortfolioEngine:
         }
         if stored != replayed:
             raise StateCorruptionError("stored positions do not match the ledger replay")
+        if cfg.settlement == "t1":
+            at = state.last_processed_asof or _UNFUNDED_ASOF
+            owed = {
+                sid: folded.unsettled(sid, at)
+                for sid in sorted(folded.cash)
+                if folded.unsettled(sid, at) > 0
+            }
+            if owed != {k: v for k, v in state.unsettled.items() if v > 0}:
+                raise StateCorruptionError("stored unsettled cash does not match the ledger replay")
         self._validate_counters_and_flags(state)
         self._ids = OrderIdGenerator(state.next_order_n)
         self._broker = SimBroker(
@@ -282,8 +308,8 @@ class PortfolioEngine:
             raise StateCorruptionError(f"kill_state unreadable: {exc}") from exc
         if peak < floor or (not killed and peak < last_equity):
             raise StateCorruptionError("kill_state.peak_equity is inconsistent with history")
-        last_event = max((e.asof for e in state.ledger), default=_UNFUNDED_ASOF)
-        if (state.last_processed_asof or _UNFUNDED_ASOF) < last_event:
+        last_event = max((asof_key(e.asof) for e in state.ledger), default=asof_key(_UNFUNDED_ASOF))
+        if asof_key(state.last_processed_asof or _UNFUNDED_ASOF) < last_event:
             raise StateCorruptionError("last_processed_asof is before the last ledger event")
 
     def _restore_book(self, state: EngineState) -> None:
@@ -318,8 +344,8 @@ class PortfolioEngine:
         return self._config
 
     @property
-    def last_processed_asof(self) -> date | None:
-        """Date of the last processed bar (``None`` before the first)."""
+    def last_processed_asof(self) -> AsOf | None:
+        """Date (daily) or UTC bar-open datetime (intraday) of the last processed bar."""
         return self._last_asof
 
     def get_order(self, order_id: str) -> Order:
@@ -335,10 +361,11 @@ class PortfolioEngine:
         with money_context():
             return self._make_snapshot(self._last_asof if self._last_asof else date.min)
 
-    def _make_snapshot(self, asof: date) -> PortfolioSnapshot:
-        crypto = [
-            s for s in sorted(self._last_close) if self._asset_class_of(s) is AssetClass.CRYPTO
-        ]
+    def _make_snapshot(self, asof: AsOf) -> PortfolioSnapshot:
+        # Only held symbols are ever marked, so only they can be crypto exposure (cheap even
+        # when ``_last_close`` holds hundreds of symbols).
+        held = {sym for book in self._ledger.state_view.positions.values() for sym in book}
+        crypto = [s for s in sorted(held) if self._asset_class_of(s) is AssetClass.CRYPTO]
         return self._portfolio.snapshot(
             asof,
             self._last_close,
@@ -355,14 +382,66 @@ class PortfolioEngine:
 
     # ------------------------------------------------------------------ the per-bar protocol
 
-    def process_bar(self, asof: date, bars: Mapping[str, Bar]) -> BarResult:
-        """Run steps A-F for bar ``asof``. Raises ``StaleBarError`` if ``asof`` does not advance."""
-        with money_context():
-            return self._process_bar(asof, bars)
+    def process_bar(
+        self,
+        asof: AsOf,
+        bars: Mapping[str, Bar],
+        *,
+        session_end: bool = False,
+        lean: bool = False,
+    ) -> BarResult:
+        """Run steps A-F for bar ``asof``. Raises ``StaleBarError`` if ``asof`` does not advance.
 
-    def _process_bar(self, asof: date, bars: Mapping[str, Bar]) -> BarResult:
+        ``session_end``: last bar of an intraday session; with ``intraday_flatten`` every position
+        is sold at this bar's close (after step B). ``lean``: only held and pending symbols are
+        converted and marked from ``bars`` (a mapping only probed with ``in`` / ``[]``); targeted
+        symbols are pulled by ``submit_target_weights``. Both default to the daily behaviour.
+        """
+        with money_context():
+            return self._process_bar(asof, bars, session_end, lean)
+
+    def _lean_bars(self, bars: Mapping[str, Bar]) -> dict[str, Bar]:
+        """The bars of held and pending-order symbols (the only ones step A-D can touch)."""
+        need = {sym for book in self._ledger.state_view.positions.values() for sym in book}
+        need |= {o.symbol for o in self._broker.pending_orders}
+        return {sym: bars[sym] for sym in sorted(need) if sym in bars}
+
+    def _pull_marks(self, symbols: Sequence[str]) -> None:
+        """Lean mode: mark targeted symbols from the current bar map (same math as step B)."""
+        if self._cur_bars is None:
+            return
+        for sym in sorted(symbols):
+            if sym in self._fresh:
+                continue
+            if sym in self._cur_bars:
+                bar = self._cur_bars[sym]
+            else:  # no bar now: full marking would still hold the symbol's last processed close
+                last = getattr(self._cur_bars, "last_known", None)
+                bar = last(sym) if last is not None else None
+                if bar is None:
+                    continue
+            if bar.symbol != sym:
+                raise ValueError(f"bars[{sym!r}] holds a bar for {bar.symbol!r}")
+            close = to_price(bar.close)
+            v = _finite(bar.vol20)
+            self._last_close[sym] = close
+            self._broker.observe_close(sym, close)
+            if v is None:
+                self._last_vol20.pop(sym, None)
+            else:
+                self._last_vol20[sym] = to_ratio(v)
+            self._fresh.add(sym)
+
+    def _process_bar(
+        self, asof: AsOf, bars: Mapping[str, Bar], session_end: bool, lean: bool
+    ) -> BarResult:
         if self._last_asof is not None and asof <= self._last_asof:
             raise StaleBarError(f"asof {asof} is not after last processed {self._last_asof}")
+        prev_asof = self._last_asof
+        self._cur_bars = bars if lean else None
+        self._fresh = set()
+        if lean:
+            bars = self._lean_bars(bars)
         _check_canonical(sorted(bars), "process_bar")
         for key, bar in bars.items():
             if bar.symbol != key:
@@ -391,6 +470,13 @@ class PortfolioEngine:
             else:
                 self._last_vol20[sym] = vol
         self._last_asof = asof
+        self._fresh.update(bars)
+        flat_fills: list[Order] = []
+        flat_rejected: list[Order] = []
+        flat_cancelled: list[Order] = []
+        if session_end and self._config.intraday_flatten:
+            fr = self._flatten(asof, prev_asof)
+            flat_fills, flat_rejected, flat_cancelled = fr.fills, fr.rejected, fr.expired
         # C: rebalance transfers for a plan decided on an earlier bar.
         if self._plan is not None:
             tr = execute_transfers(
@@ -449,22 +535,31 @@ class PortfolioEngine:
             snap = self._make_snapshot(asof)
         return BarResult(
             asof=asof,
-            fills=fill_result.fills,
+            fills=fill_result.fills + flat_fills,
             stop_orders=stop_orders,
             expired=fill_result.expired,
             new_ledger_events=list(self._ledger.events[n_before:]),
             snapshot=snap,
             kill_switch_tripped=obs.tripped_now,
             rebalance_planned=planned,
-            rejected=fill_result.rejected,
-            cancelled=cancelled,
+            rejected=fill_result.rejected + flat_rejected,
+            cancelled=cancelled + flat_cancelled,
         )
 
+    def _flatten(self, asof: AsOf, prev_asof: AsOf | None) -> FillResult:
+        """Sell every position at this bar's close (a symbol without a bar uses its last close)."""
+        held = sorted({sym for book in self._ledger.state_view.positions.values() for sym in book})
+        if not held and not self._broker.pending_orders:
+            return FillResult(asof=asof, fills=[], rejected=[], expired=[], new_ledger_events=[])
+        submitted = prev_asof if prev_asof is not None else asof - timedelta(seconds=1)  # type: ignore[operator]
+        closes = {sym: self._last_close[sym] for sym in held}
+        return self._broker.flatten_at_close(asof, closes, submitted)
+
     def _step_stops(
-        self, asof: date, closes: Mapping[str, Decimal], atrs: Mapping[str, Decimal | None]
+        self, asof: AsOf, closes: Mapping[str, Decimal], atrs: Mapping[str, Decimal | None]
     ) -> list[Order]:
         """Step D: update trailing stops of held positions and submit STOP exits."""
-        state = self._ledger.state
+        state = self._ledger.state_view
         # Drop stop levels of positions that went flat (or were re-opened) since last bar.
         for sid, syms in self._stops.to_state()["levels"].items():
             for sym in syms:
@@ -531,7 +626,7 @@ class PortfolioEngine:
     # ------------------------------------------------------------------ strategy intent
 
     def submit_target_weights(
-        self, sleeve_id: str, weights: Mapping[str, float], asof: date
+        self, sleeve_id: str, weights: Mapping[str, float], asof: AsOf
     ) -> TargetResult:
         """Size, risk-check and submit a sleeve's target weights (call after ``process_bar``).
 
@@ -542,7 +637,7 @@ class PortfolioEngine:
             return self._submit_target_weights(sleeve_id, weights, asof)
 
     def _submit_target_weights(
-        self, sleeve_id: str, weights: Mapping[str, float], asof: date
+        self, sleeve_id: str, weights: Mapping[str, float], asof: AsOf
     ) -> TargetResult:
         sleeve = self._sleeve(sleeve_id)
         if self._last_asof is None or asof != self._last_asof:
@@ -551,6 +646,7 @@ class PortfolioEngine:
                 f"{self._last_asof}"
             )
         _check_canonical(sorted(weights), "submit_target_weights")
+        self._pull_marks([sym for sym, x in weights.items() if x])
         w = {sym: to_weight(x) for sym, x in sorted(weights.items())}
         # Each weight is rounded to WEIGHT_Q, so the sum may drift by len(w) * WEIGHT_Q.
         if sum(w.values(), Decimal(0)) > 1 + len(w) * WEIGHT_Q:
@@ -618,7 +714,7 @@ class PortfolioEngine:
 
     # ------------------------------------------------------------------ low-level order API
 
-    def submit_orders(self, requests: Sequence[OrderRequest], asof: date) -> list[Order]:
+    def submit_orders(self, requests: Sequence[OrderRequest], asof: AsOf) -> list[Order]:
         """Low-level order entry (stops, tests). BUYs are refused while the switch is tripped."""
         if self._ks.killed and any(r.side is Side.BUY for r in requests):
             raise ValueError("kill switch tripped: BUY orders are not accepted")
@@ -629,7 +725,7 @@ class PortfolioEngine:
         """Cancel a PENDING order."""
         return self._broker.cancel_order(order_id)
 
-    def reset_kill_switch(self, operator: str, note: str, asof: date) -> None:
+    def reset_kill_switch(self, operator: str, note: str, asof: AsOf) -> None:
         """Manual reset (CLI only; never called by the backtester or driver).
 
         Clears the flag, sets ``peak_equity`` to the last observed equity and books
@@ -657,7 +753,15 @@ class PortfolioEngine:
         """Checkpoint everything needed to continue identically (see :class:`EngineState`)."""
         with money_context():
             book = self._broker.export_book()
-            folded = self._ledger.state
+            folded = self._ledger.state_view
+            owed = (
+                {
+                    sid: folded.unsettled(sid, self._last_asof or _UNFUNDED_ASOF)
+                    for sid in sorted(folded.cash)
+                }
+                if self._config.settlement == "t1"
+                else {}
+            )
             positions = {
                 sid: [
                     PositionState(
@@ -689,6 +793,7 @@ class PortfolioEngine:
                 last_vol20=dict(sorted(self._last_vol20.items())),
                 cash=dict(sorted(folded.cash.items())),
                 positions=positions,
+                unsettled={sid: v for sid, v in owed.items() if v > 0},
             )
 
     def verify(self) -> None:

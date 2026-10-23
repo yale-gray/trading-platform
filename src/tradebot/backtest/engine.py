@@ -34,6 +34,7 @@ from tradebot.backtest.trades import (
 )
 from tradebot.data.symbols import asset_class, normalize_symbol
 from tradebot.data.types import AssetClass
+from tradebot.portfolio.asof import AsOf
 from tradebot.portfolio.config import EngineConfig, SleeveConfig
 from tradebot.portfolio.engine import PortfolioEngine
 from tradebot.portfolio.models import LedgerEvent
@@ -88,8 +89,8 @@ class BacktestResult(BaseModel):
     exposure: pd.Series
     trades: list[ClosedTrade]
     open_positions: list[OpenPosition]
-    killed_on: date | None
-    killed_dates: list[date] = []  # every trip (killed_on is the first); not in to_json
+    killed_on: AsOf | None
+    killed_dates: list[AsOf] = []  # every trip (killed_on is the first); not in to_json
     ledger: list[LedgerEvent]
     n_signals: int
 
@@ -106,8 +107,8 @@ class BacktestReport(BaseModel):
     deltas: dict[str, dict[str, float]]  # fund minus benchmark, per benchmark
 
     @property
-    def killed_on(self) -> date | None:
-        """Date the kill switch tripped, or ``None`` (already in ``to_json`` as ``killed_on``)."""
+    def killed_on(self) -> AsOf | None:
+        """When the kill switch tripped (date, or bar-open datetime on intraday), or ``None``."""
         return self.result.killed_on
 
     def to_json(self) -> str:
@@ -147,7 +148,10 @@ def _clean(x: Any) -> Any:
 
 
 def _series_rows(s: pd.Series) -> list[list[Any]]:
-    return [[ts.date().isoformat(), float(v)] for ts, v in s.items()]
+    intraday = len(s) > 0 and not bool((s.index == s.index.normalize()).all())
+    return [
+        [(ts.isoformat() if intraday else ts.date().isoformat()), float(v)] for ts, v in s.items()
+    ]
 
 
 def _ledger_hash(ledger: list[LedgerEvent]) -> str:
@@ -160,7 +164,13 @@ def _ledger_hash(ledger: list[LedgerEvent]) -> str:
 
 def _config_payload(cfg: BacktestConfig) -> dict[str, Any]:
     eng = cfg.engine
+    flags: dict[str, Any] = {}  # day-trading flags join the hash only when set (daily is stable)
+    if eng.intraday_flatten:
+        flags["intraday_flatten"] = True
+    if eng.settlement != "none":
+        flags["settlement"] = eng.settlement
     return {
+        **flags,
         "start": cfg.start.isoformat(),
         "end": cfg.end.isoformat(),
         "rf_annual": cfg.rf_annual,
@@ -229,8 +239,13 @@ def _required(cfg: BacktestConfig) -> list[str]:
     return sorted(syms)
 
 
+def _timeframe(cfg: BacktestConfig) -> str:
+    """The run's bar size: ``15m`` if any strategy is a 15m one, else ``1d``."""
+    return "15m" if any(s.strategy and s.strategy.timeframe == "15m" for s in cfg.sleeves) else "1d"
+
+
 def _p_for(cfg: BacktestConfig) -> int:
-    return periods_per_year(_required(cfg))
+    return periods_per_year(_required(cfg), _timeframe(cfg))
 
 
 # ---------------------------------------------------------------------------- run
@@ -296,16 +311,18 @@ def run_backtest(cfg: BacktestConfig, bars: Mapping[str, pd.DataFrame]) -> Backt
 # ---------------------------------------------------------------------------- benchmark
 
 
-def _hold_spec(symbol: str) -> StrategySpec:
+def _hold_spec(symbol: str, timeframe: str = "1d") -> StrategySpec:
     """Buy-and-hold: enter on bar one (entry always true), never exit."""
     ac = "crypto" if asset_class(normalize_symbol(symbol)) is AssetClass.CRYPTO else "equity"
+    intraday = timeframe == "15m"
     return RulesSpec.model_validate(
         {
             "id": f"bh_{symbol.replace('/', '_').lower()}",
             "name": f"Buy and hold {symbol}",
             "asset_class": ac,
+            **({"timeframe": "15m"} if intraday else {}),
             "universe": [symbol],
-            "schedule": {"freq": "daily"},
+            "schedule": {"freq": "bar" if intraday else "daily"},
             "entry": {"always": True},
             "position": {"weight": 1.0},
         }
@@ -313,14 +330,18 @@ def _hold_spec(symbol: str) -> StrategySpec:
 
 
 def _bench_config(
-    cfg: BacktestConfig, parts: list[tuple[str, Decimal, str]], cash: Decimal
+    cfg: BacktestConfig, parts: list[tuple[str, Decimal, str]], cash: Decimal, timeframe: str = "1d"
 ) -> BacktestConfig:
-    """``parts`` = (sleeve_id, weight, symbol). Same costs/capital, relaxed risk caps."""
+    """``parts`` = (sleeve_id, weight, symbol). Same costs/capital, relaxed risk caps.
+
+    The benchmark is plain buy-and-hold: no end-of-day flatten and no T+1 settlement, whatever
+    the fund's account type (a day-trading fund is measured against simply holding SPY).
+    """
     sleeves: list[SleeveSpec] = []
     scs: list[SleeveConfig] = []
     for sid, weight, sym in parts:
         ac = asset_class(normalize_symbol(sym))
-        sleeves.append(SleeveSpec(sleeve_id=sid, strategy=_hold_spec(sym)))
+        sleeves.append(SleeveSpec(sleeve_id=sid, strategy=_hold_spec(sym, timeframe)))
         scs.append(
             SleeveConfig(
                 sleeve_id=sid,
@@ -347,7 +368,14 @@ def _bench_config(
         kill_switch_drawdown=Decimal(1),
         max_pending_bars=cfg.engine.risk.max_pending_bars,
     )
-    eng = cfg.engine.model_copy(update={"sleeves": tuple(scs), "risk": risk})
+    eng = cfg.engine.model_copy(
+        update={
+            "sleeves": tuple(scs),
+            "risk": risk,
+            "intraday_flatten": False,
+            "settlement": "none",
+        }
+    )
     return BacktestConfig(
         sleeves=sleeves, start=cfg.start, end=cfg.end, engine=eng, rf_annual=cfg.rf_annual
     )
@@ -371,8 +399,9 @@ def run_with_benchmark(cfg: BacktestConfig, bars: Mapping[str, pd.DataFrame]) ->
             weights[spec.asset_class] += sc.target_weight
     cash = Decimal(1) - weights["equity"] - weights["crypto"]
     runs: dict[str, BacktestConfig] = {}
+    tf = _timeframe(cfg)
     if weights["equity"] > 0:
-        runs["SPY"] = _bench_config(cfg, [("bh_equity", Decimal(1), "SPY")], Decimal(0))
+        runs["SPY"] = _bench_config(cfg, [("bh_equity", Decimal(1), "SPY")], Decimal(0), tf)
     if weights["crypto"] > 0:
         runs["BTC/USD"] = _bench_config(cfg, [("bh_crypto", Decimal(1), "BTC/USD")], Decimal(0))
     if weights["equity"] > 0 and weights["crypto"] > 0:

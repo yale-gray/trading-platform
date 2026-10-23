@@ -13,7 +13,18 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tradebot.strategy.indicators import INDICATORS, atr, bbands, ema, macd, ret, rsi, sma, vol
+from tradebot.strategy.indicators import (
+    INDICATORS,
+    atr,
+    bbands,
+    devatr,
+    ema,
+    macd,
+    ret,
+    rsi,
+    sma,
+    vol,
+)
 
 TOL = 1e-9
 NAN = math.nan
@@ -226,6 +237,7 @@ _N0_CALLS = {
     "macd_signal": lambda: macd(X_V, fast=2, slow=3, signal=0),
     "bbands": lambda: bbands(X_V, 0),
     "atr": lambda: atr(X_V, X_V, X_V, 0),
+    "devatr": lambda: devatr(X_V, X_V, X_V, 0),
     "vol": lambda: vol(X_V, 0),
 }
 
@@ -240,7 +252,7 @@ def test_zero_length_window_raises(name: str):
 
 
 def test_indicators_registry_has_exact_keys():
-    assert set(INDICATORS) == {"sma", "ema", "ret", "rsi", "macd", "bbands", "atr", "vol"}
+    assert set(INDICATORS) == {"sma", "ema", "ret", "rsi", "macd", "bbands", "atr", "devatr", "vol"}
 
 
 def _random_walk_ohlc() -> tuple[pd.Series, pd.Series, pd.Series]:
@@ -266,6 +278,7 @@ _CALLS = {
     "macd": lambda c, h, lo: macd(c, fast=12, slow=26, signal=9),
     "bbands": lambda c, h, lo: bbands(c, 20, 2.0),
     "atr": lambda c, h, lo: atr(h, lo, c, 14),
+    "devatr": lambda c, h, lo: devatr(h, lo, c, 5),
     "vol": lambda c, h, lo: vol(c, 20),
 }
 
@@ -311,3 +324,22 @@ def test_truncation_invariance(name: str):
                 equal_nan=True,
                 err_msg=f"{name}.{col} at t={t} differs when computed on x[:t+1]",
             )
+
+
+def test_devatr_is_distance_from_average_in_atr_units():
+    """Hand calculation: closes 10,10,10,10,7 -> SMA(3) at t=4 is 9; ATR(2) via Wilder."""
+    close = pd.Series([10.0, 10.0, 10.0, 10.0, 7.0])
+    high = pd.Series([10.5, 10.5, 10.5, 10.5, 10.5])
+    low = pd.Series([9.5, 9.5, 9.5, 9.5, 6.5])
+    out = devatr(high, low, close, 3, atr_n=2)
+    a = atr(high, low, close, 2)
+    # TR: nan, 1, 1, 1, max(4, 0.5, 3.5) = 4 ; Wilder(2): seed t=2 -> 1, t=3 -> 1, t=4 -> 2.5
+    assert a.iloc[4] == pytest.approx(2.5)
+    assert out.iloc[4] == pytest.approx((7.0 - (10 + 10 + 7) / 3) / 2.5)
+    assert out.iloc[:2].isna().all()  # first valid bar is max(n - 1, atr_n) = 2
+    assert out.iloc[2] == pytest.approx(0.0)
+
+
+def test_devatr_is_nan_when_atr_is_zero():
+    flat = pd.Series([5.0] * 6)
+    assert devatr(flat, flat, flat, 3, atr_n=2).isna().all()

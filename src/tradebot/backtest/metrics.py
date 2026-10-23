@@ -35,8 +35,17 @@ class Metrics(BaseModel):
     periods_per_year: int
 
 
-def periods_per_year(symbols_or_classes: Iterable[str]) -> int:
-    """365 if any item is crypto (a symbol like ``BTC/USD`` or the class name), else 252."""
+BARS_PER_SESSION_15M = 26
+"""Regular-session 15-minute bars per day (09:30-16:00 ET); early closes have fewer."""
+
+
+def periods_per_year(symbols_or_classes: Iterable[str], timeframe: str = "1d") -> int:
+    """365 if any item is crypto (a symbol like ``BTC/USD`` or the class name), else 252.
+
+    ``timeframe="15m"`` (equities only): 252 sessions x 26 bars = 6552.
+    """
+    if timeframe == "15m":
+        return 252 * BARS_PER_SESSION_15M
     for item in symbols_or_classes:
         if item.upper() == AssetClass.CRYPTO.value:
             return 365

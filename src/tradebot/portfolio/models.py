@@ -8,7 +8,6 @@ type: canonical text or ``Decimal`` in, canonical text out, floats rejected.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import date
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Annotated, Any, NoReturn
@@ -23,6 +22,7 @@ from pydantic import (
     model_validator,
 )
 
+from tradebot.portfolio.asof import AsOf
 from tradebot.portfolio.money import (
     PRICE_Q,
     QTY8_Q,
@@ -141,7 +141,7 @@ class LedgerEvent(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     seq: int = Field(ge=1)
-    asof: date
+    asof: AsOf
     stage: Stage
     sleeve_id: str
     type: EventType
@@ -214,7 +214,7 @@ class Position(BaseModel):
     symbol: str
     qty: Dec
     cost_basis: Dec
-    entry_asof: date | None
+    entry_asof: AsOf | None
     high_water_close: Dec | None = None
     stop_level: Dec | None = None
 
@@ -246,7 +246,7 @@ class PositionSnapshot(BaseModel):
     mv: Dec
     cost_basis: Dec
     unrealized: Dec
-    entry_asof: date | None
+    entry_asof: AsOf | None
     high_water_close: Dec | None = None
     stop_level: Dec | None = None
 
@@ -266,8 +266,9 @@ class SleeveSnapshot(BaseModel):
     equity: Dec
     weight: Dec
     positions: list[PositionSnapshot]
+    unsettled: Dec = Decimal("0.00")  # part of ``cash`` that cannot fund a BUY yet (A21 T+1)
 
-    @field_validator("cash", "equity", mode="after")
+    @field_validator("cash", "equity", "unsettled", mode="after")
     @classmethod
     def _canonical_cents(cls, v: Decimal) -> Decimal:
         return canon_cents(v)  # type: ignore[return-value]
@@ -278,9 +279,10 @@ class PortfolioSnapshot(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    asof: date
+    asof: AsOf
     equity: Dec
     cash: Dec
+    unsettled: Dec = Decimal("0.00")
     drawdown: Dec
     peak_equity: Dec
     killed: bool
@@ -289,7 +291,7 @@ class PortfolioSnapshot(BaseModel):
     exposures: dict[str, Dec]
     crypto_fraction: Dec
 
-    @field_validator("equity", "cash", "peak_equity", mode="after")
+    @field_validator("equity", "cash", "unsettled", "peak_equity", mode="after")
     @classmethod
     def _canonical_cents(cls, v: Decimal) -> Decimal:
         return canon_cents(v)  # type: ignore[return-value]

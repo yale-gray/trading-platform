@@ -30,6 +30,7 @@ from tradebot.data.errors import (
     UnknownSymbolError,
     quarantine_warning,
 )
+from tradebot.data.intraday_sync import DEFAULT_INTRADAY_START, IntradaySync
 from tradebot.data.provider import DataProvider
 from tradebot.data.providers.ccxt_provider import CcxtProvider
 from tradebot.data.providers.yfinance_provider import YFinanceProvider
@@ -37,7 +38,7 @@ from tradebot.data.quality import QualityReport, validate_bars
 from tradebot.data.restatement import reconcile_overlap
 from tradebot.data.symbols import asset_class, normalize_symbol
 from tradebot.data.types import BAR_COLUMNS, AssetClass, Symbol, Timeframe
-from tradebot.data.universe import DEFAULT_UNIVERSE
+from tradebot.data.universe import DEFAULT_UNIVERSE, SP500_UNIVERSE
 
 log = logging.getLogger(__name__)
 
@@ -83,6 +84,8 @@ class MarketData:
         *,
         cache: BarCache | None = None,
         offline: bool = False,
+        intraday_history: DataProvider | None = None,
+        intraday_live: DataProvider | None = None,
     ) -> None:
         self._config = config if config is not None else DataConfig()
         self._clock: Clock = clock if clock is not None else SystemClock()
@@ -97,6 +100,9 @@ class MarketData:
             ]
         self._providers: list[DataProvider] = list(providers)
         self._cache = cache if cache is not None else BarCache(self._config.cache_dir, self._clock)
+        self._intraday = IntradaySync(
+            self._cache, self._config, self._clock, intraday_history, intraday_live
+        )
         self._head_tried: dict[tuple[str, str], date] = {}
         # (source, symbol) -> (cache generation at the time, error). Memoises a quarantined
         # revision so repeated refreshes do not re-fetch; cleared by ``rebase``.
@@ -437,9 +443,13 @@ class MarketData:
         require_fresh: bool = False,
     ) -> dict[Symbol, pd.DataFrame]:
         """Like :meth:`get_bars` for many symbols; equities share one batch download."""
+        canon = list(dict.fromkeys(normalize_symbol(s) for s in symbols))
+        if timeframe is Timeframe.M15:
+            return self._get_bars_many_15m(
+                canon, start, end, refresh, generation, require_fresh=require_fresh
+            )
         if timeframe is not Timeframe.D1:
             raise DataError(f"unsupported timeframe {timeframe}")
-        canon = list(dict.fromkeys(normalize_symbol(s) for s in symbols))
         if refresh and not self._offline and generation is None:
             _, errors = self._sync_tails(canon, start)
             for symbol in canon:
@@ -456,6 +466,42 @@ class MarketData:
             frame = _empty_bars() if end < start else self._read(symbol, start, end, generation)
             if require_fresh:
                 self._check_fresh(symbol, self._read(symbol, None, None, generation))
+            out[symbol] = frame
+        return out
+
+    def _get_bars_many_15m(
+        self,
+        canon: list[Symbol],
+        start: date,
+        end: date,
+        refresh: bool,
+        generation: int | None,
+        *,
+        require_fresh: bool,
+    ) -> dict[Symbol, pd.DataFrame]:
+        """15m bars with New York session date in ``[start, end]`` (A21).
+
+        History comes from the SIP cache; the not-yet-cached last few bars come from the
+        live (IEX) provider, in memory only. ``require_fresh`` tolerates 4 missing bars.
+        """
+        online = refresh and not self._offline and generation is None
+        if online:
+            _, errors = self._intraday.refresh(canon, start)
+            if errors:  # every symbol was attempted; surface the first failure
+                raise next(iter(errors.values()))
+        out: dict[Symbol, pd.DataFrame] = {}
+        for symbol in canon:
+            if end < start:
+                out[symbol] = _empty_bars()
+                continue
+            frame = self._intraday.read(symbol, start, end)
+            if online:
+                frame = self._intraday.with_live_tail(symbol, frame, start, end)
+            if require_fresh:
+                latest = self._intraday.read(symbol, None, None)
+                if online:
+                    latest = self._intraday.with_live_tail(symbol, latest, start, end)
+                self._intraday.check_fresh(symbol, latest, live=online)
             out[symbol] = frame
         return out
 
@@ -480,22 +526,45 @@ class MarketData:
         return row
 
     # ---- maintenance ----------------------------------------------------
-    def refresh(self, symbols: Sequence[str] | None = None) -> dict[Symbol, QualityReport]:
+    def refresh(
+        self,
+        symbols: Sequence[str] | None = None,
+        *,
+        timeframe: Timeframe = Timeframe.D1,
+        start: date | None = None,
+    ) -> dict[Symbol, QualityReport]:
         """Fetch the missing tail (with overlap window) for each symbol.
 
-        Defaults to ``DEFAULT_UNIVERSE``. Offline: reports on the cache only.
+        Defaults to ``DEFAULT_UNIVERSE`` (``SP500_UNIVERSE`` for 15m). Offline: reports on the
+        cache only. ``start`` applies to 15m only (default 2016-01-01 for new symbols).
         """
+        if timeframe is Timeframe.M15:
+            canon15 = list(dict.fromkeys(normalize_symbol(s) for s in (symbols or SP500_UNIVERSE)))
+            if self._offline:
+                return {s: self._intraday.cache_report(s) for s in canon15}
+            reports15, _ = self._intraday.refresh(canon15, start or DEFAULT_INTRADAY_START)
+            return {
+                s: reports15[s] if s in reports15 else self._intraday.cache_report(s)
+                for s in canon15
+            }
+        if timeframe is not Timeframe.D1:
+            raise DataError(f"unsupported timeframe {timeframe}")
         canon = list(dict.fromkeys(normalize_symbol(s) for s in (symbols or DEFAULT_UNIVERSE)))
         reports = {} if self._offline else self._sync_tails(canon, None)[0]
         return {s: reports[s] if s in reports else self._cache_report(s) for s in canon}
 
-    def verify(self, symbols: Sequence[str] | None = None) -> dict[Symbol, QualityReport]:
+    def verify(
+        self, symbols: Sequence[str] | None = None, *, timeframe: Timeframe = Timeframe.D1
+    ) -> dict[Symbol, QualityReport]:
         """Check cache integrity (sha256) and re-run quality validation on cached bars.
 
         Never calls a provider. A quality failure is reported in ``warnings`` rather
         than raised, and so is a corrupt cache file (``status="corrupt"``), so one bad
         symbol does not hide the rest.
         """
+        if timeframe is Timeframe.M15:
+            canon15 = list(dict.fromkeys(normalize_symbol(s) for s in (symbols or SP500_UNIVERSE)))
+            return {s: self._intraday.cache_report(s) for s in canon15}
         canon = list(dict.fromkeys(normalize_symbol(s) for s in (symbols or DEFAULT_UNIVERSE)))
         return {s: self._cache_report(s) for s in canon}
 

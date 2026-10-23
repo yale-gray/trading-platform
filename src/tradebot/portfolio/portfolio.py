@@ -46,6 +46,14 @@ class Portfolio:
     def cash(self, sleeve_id: str) -> Decimal:
         return self.ledger.state_view.cash[sleeve_id]
 
+    def unsettled(self, sleeve_id: str, asof: date) -> Decimal:
+        """Part of the sleeve's cash that cannot fund a BUY at ``asof`` (T+1 accounts only)."""
+        return self.ledger.state_view.unsettled(sleeve_id, asof)
+
+    def settled_cash(self, sleeve_id: str, asof: date) -> Decimal:
+        """Cash the sleeve can spend on BUYs or transfers at ``asof``."""
+        return self.ledger.state_view.spendable(sleeve_id, asof)
+
     def positions(self, sleeve_id: str) -> dict[str, Position]:
         """Positions of a sleeve with the stop overlay applied."""
         out: dict[str, Position] = {}
@@ -101,6 +109,7 @@ class Portfolio:
         crypto_symbols: Collection[str],
     ) -> PortfolioSnapshot:
         state = self.ledger.state_view
+        uns = {sid: state.unsettled(sid, asof) for sid in state.cash} if state.t1 else {}
         marked: list[tuple[str, Decimal, list[PositionSnapshot]]] = []
         for sid in sorted(state.cash):
             pss: list[PositionSnapshot] = []
@@ -135,6 +144,7 @@ class Portfolio:
                 equity=eq,
                 weight=q_weight(eq / equity) if equity > 0 else Decimal("0.000000"),
                 positions=pss,
+                unsettled=uns.get(sid, ZERO),
             )
             for sid, eq, pss in marked
         ]
@@ -152,6 +162,7 @@ class Portfolio:
             asof=asof,
             equity=equity,
             cash=sum(state.cash.values(), ZERO),
+            unsettled=sum(uns.values(), ZERO),
             drawdown=q_ratio(1 - equity / peak) if peak > 0 else q_ratio(Decimal(0)),
             peak_equity=peak,
             killed=killed,
@@ -194,7 +205,11 @@ class Portfolio:
         state: LedgerState = given if given is not None else self.ledger.state_view
         do_replay = full_replay if full_replay is not None else given is None
         if do_replay:
-            again = replay(self.ledger.events, state.equity_qty_quantum)
+            again = (
+                replay(self.ledger.events, state.equity_qty_quantum, True)
+                if state.t1
+                else replay(self.ledger.events, state.equity_qty_quantum)
+            )
             live = self.ledger.state_view
             if again.cash != live.cash or again.positions != live.positions:
                 raise LedgerError("I5: replay does not reproduce state")

@@ -7,13 +7,13 @@ its canonical text (ADR D7) and parsed back strictly, so a round trip is exact.
 
 from __future__ import annotations
 
-from datetime import date
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from tradebot.portfolio.asof import AsOf
 from tradebot.portfolio.models import Dec
 
 
@@ -42,6 +42,7 @@ class OrderOrigin(StrEnum):
     STOP = "STOP"
     REBALANCE = "REBALANCE"
     MANUAL = "MANUAL"
+    FLATTEN = "FLATTEN"  # end-of-session exit of an intraday account (ADR-0001 A21)
 
 
 TERMINAL_STATES: frozenset[OrderStatus] = frozenset(
@@ -123,9 +124,9 @@ class Order(BaseModel):
     qty_accepted: Dec | None = None
     qty_filled: Dec = Decimal("0")
     status: OrderStatus = OrderStatus.NEW
-    created_asof: date
+    created_asof: AsOf
     ref_price: Dec | None = None
-    fill_asof: date | None = None
+    fill_asof: AsOf | None = None
     fill_price: Dec | None = None
     fee: Dec | None = None
     reason: OrderReason | None = None
@@ -170,7 +171,7 @@ def transition(
     *,
     qty_accepted: Decimal | None = _UNSET,
     qty_filled: Decimal = _UNSET,
-    fill_asof: date | None = _UNSET,
+    fill_asof: AsOf | None = _UNSET,
     fill_price: Decimal | None = _UNSET,
     fee: Decimal | None = _UNSET,
     reason: OrderReason | None = _UNSET,

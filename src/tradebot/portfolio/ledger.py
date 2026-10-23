@@ -22,6 +22,10 @@ Rules enforced by the fold (so also on a hand-made event list):
 * a SELL whose proceeds round to 0.00 is rejected unless it is a full exit of
   the position (a dust position may be closed at zero proceeds; a partial
   zero-proceeds SELL would only erase basis) (R3);
+* with ``t1_settlement`` (cash account, ADR-0001 A21) the proceeds of a SELL stay in ``cash`` but
+  are *unsettled* until the next trading day: BUY fills, FEEs on BUYs and transfers out may only
+  spend ``cash - unsettled`` (the fee of a SELL comes out of that SELL's own unsettled lot).
+  The unsettled lots are derived from the events alone, so replay and restore reproduce them;
 * each ``transfer_id`` has at most one OUT and one IN leg, with equal amounts in
   different sleeves; unpaired legs are reported by :meth:`LedgerState.unpaired_transfers`
   and rejected when a :class:`Ledger` is built from an event list (I7).
@@ -35,6 +39,7 @@ from decimal import Decimal
 
 from tradebot.data.symbols import asset_class
 from tradebot.data.types import AssetClass
+from tradebot.portfolio.asof import AsOf, trade_day
 from tradebot.portfolio.models import (
     ANNOTATION_TYPES,
     EventType,
@@ -56,9 +61,15 @@ class LedgerError(ValueError):
 class LedgerState:
     """Per-sleeve cash and positions, plus running totals for I6."""
 
-    def __init__(self, equity_qty_quantum: Decimal | None = None) -> None:
+    def __init__(
+        self, equity_qty_quantum: Decimal | None = None, t1_settlement: bool = False
+    ) -> None:
         # None: equity quantities need only be on the 8 dp grid (no config known).
         self.equity_qty_quantum = equity_qty_quantum
+        self.t1 = t1_settlement
+        # sleeve -> order_id -> (trade day, unsettled amount) of SELL proceeds not yet settled.
+        # Lots older than the current trade day are dropped as events arrive (they are settled).
+        self.lots: dict[str, dict[str, tuple[date, Decimal]]] = {}
         self.cash: dict[str, Decimal] = {}
         self.positions: dict[str, dict[str, Position]] = {}
         self.deposits = ZERO
@@ -75,6 +86,22 @@ class LedgerState:
         self.filled_sleeves: set[str] = set()
         # transfer_id -> {"OUT"|"IN": (sleeve, amount)}; I7 pairing.
         self.transfers: dict[str, dict[str, tuple[str, Decimal]]] = {}
+
+    def unsettled(self, sleeve_id: str, asof: date) -> Decimal:
+        """Part of the sleeve's ``cash`` that is SELL proceeds of ``asof``'s trade day or later.
+
+        Always 0 unless the ledger runs T+1 settlement. Proceeds sold on trading day X settle
+        at the start of the next trading day, so they are unsettled exactly on day X.
+        """
+        lots = self.lots.get(sleeve_id)
+        if not lots:
+            return ZERO
+        day = trade_day(asof)
+        return sum((amt for d, amt in lots.values() if d >= day), ZERO)
+
+    def spendable(self, sleeve_id: str, asof: date) -> Decimal:
+        """Settled cash that can fund a BUY (or a transfer out) at ``asof``."""
+        return self.cash.get(sleeve_id, ZERO) - self.unsettled(sleeve_id, asof)
 
     def unpaired_transfers(self) -> list[str]:
         """``transfer_id``s that lack an OUT or an IN leg (I7), sorted."""
@@ -155,6 +182,8 @@ class LedgerState:
                     update={"qty": left, "cost_basis": p.cost_basis - reduce}
                 )
             self.cash[sid] = cash + ev.amount
+            if self.t1:
+                self._add_lot(sid, ev)
             self.realized += ev.amount - reduce
             return
         # Cash-out events: BUY fill, FEE, transfer out.
@@ -162,6 +191,8 @@ class LedgerState:
             raise LedgerError(f"seq {ev.seq}: zero-notional BUY fill rejected")
         if ev.amount > cash:
             raise LedgerError(f"seq {ev.seq}: cash {cash} in {sid} cannot cover {ev.amount} (I3)")
+        if self.t1:
+            self._spend_settled(sid, ev, cash)
         self.cash[sid] = cash - ev.amount
         if ev.type is EventType.CASH_TRANSFER_OUT:
             self._record_transfer_leg(ev)
@@ -183,6 +214,30 @@ class LedgerState:
                 book[ev.symbol] = p.model_copy(
                     update={"qty": p.qty + ev.qty, "cost_basis": p.cost_basis + ev.amount}
                 )
+
+    def _add_lot(self, sid: str, ev: LedgerEvent) -> None:
+        """Record a SELL's proceeds as unsettled for its trade day (T+1)."""
+        assert ev.order_id is not None
+        day = trade_day(ev.asof)
+        lots = self.lots.setdefault(sid, {})
+        for oid in [o for o, (d, _) in lots.items() if d < day]:
+            del lots[oid]
+        if ev.amount > 0:
+            lots[ev.order_id] = (day, ev.amount)
+
+    def _spend_settled(self, sid: str, ev: LedgerEvent, cash: Decimal) -> None:
+        """T+1: a cash-out may only use settled cash; a SELL's own fee eats that SELL's lot."""
+        lots = self.lots.get(sid)
+        if ev.type is EventType.FEE and lots is not None and ev.order_id in lots:
+            day, amt = lots[ev.order_id]
+            lots[ev.order_id] = (day, max(amt - ev.amount, ZERO))
+            return
+        avail = cash - self.unsettled(sid, ev.asof)
+        if ev.amount > avail:
+            raise LedgerError(
+                f"seq {ev.seq}: settled cash {avail} in {sid} cannot cover {ev.amount} "
+                f"(T+1: {cash - avail} unsettled)"
+            )
 
     def _check_fill(self, ev: LedgerEvent) -> None:
         assert ev.order_id is not None and ev.symbol is not None and ev.qty is not None
@@ -241,6 +296,8 @@ class LedgerState:
         new.last_seq = self.last_seq
         new.opened_seq = dict(self.opened_seq)
         new.filled_sleeves = set(self.filled_sleeves)
+        new.t1 = self.t1
+        new.lots = {s: dict(d) for s, d in self.lots.items()}
         return new
 
     def rollback(self, point: LedgerState, applied: Sequence[LedgerEvent]) -> None:
@@ -249,6 +306,7 @@ class LedgerState:
         self.deposits, self.fees, self.realized = point.deposits, point.fees, point.realized
         self.last_seq, self.opened_seq = point.last_seq, point.opened_seq
         self.filled_sleeves = point.filled_sleeves
+        self.lots = point.lots
         for ev in applied:
             if ev.type is EventType.FILL and ev.order_id is not None:
                 self.fill_orders.pop(ev.order_id, None)
@@ -264,7 +322,8 @@ class LedgerState:
 
     def copy(self) -> LedgerState:
         """Independent copy (positions are frozen models, so shallow dict copies suffice)."""
-        new = LedgerState(self.equity_qty_quantum)
+        new = LedgerState(self.equity_qty_quantum, self.t1)
+        new.lots = {s: dict(d) for s, d in self.lots.items()}
         new.cash = dict(self.cash)
         new.positions = {s: dict(b) for s, b in self.positions.items()}
         new.deposits, new.fees, new.realized = self.deposits, self.fees, self.realized
@@ -298,9 +357,13 @@ def check_qty_grid(
         raise LedgerError(f"{where}: {symbol} quantity {qty} has more than 8 decimals (I4)")
 
 
-def replay(events: Iterable[LedgerEvent], equity_qty_quantum: Decimal | None = None) -> LedgerState:
+def replay(
+    events: Iterable[LedgerEvent],
+    equity_qty_quantum: Decimal | None = None,
+    t1_settlement: bool = False,
+) -> LedgerState:
     """Fold events (in order) into per-sleeve cash and positions."""
-    state = LedgerState(equity_qty_quantum)
+    state = LedgerState(equity_qty_quantum, t1_settlement)
     for ev in events:
         state.apply(ev)
     return state
@@ -315,6 +378,7 @@ class Ledger:
         *,
         expected_fee: Callable[[LedgerEvent], Decimal] | None = None,
         equity_qty_quantum: Decimal | None = None,
+        t1_settlement: bool = False,
     ) -> None:
         """Build a ledger by folding ``events`` (dense ``seq`` from 1).
 
@@ -326,7 +390,7 @@ class Ledger:
         """
         self._events: list[LedgerEvent] = []
         self.equity_qty_quantum = equity_qty_quantum
-        self._state = LedgerState(equity_qty_quantum)
+        self._state = LedgerState(equity_qty_quantum, t1_settlement)
         for ev in events:
             self._commit(ev)
         bad = self._state.unpaired_transfers()
@@ -390,7 +454,7 @@ class Ledger:
     def append(
         self,
         *,
-        asof: date,
+        asof: AsOf,
         stage: Stage,
         sleeve_id: str,
         type: EventType,
@@ -416,7 +480,7 @@ class Ledger:
     def append_fill(
         self,
         *,
-        asof: date,
+        asof: AsOf,
         stage: Stage,
         sleeve_id: str,
         symbol: str,
@@ -470,7 +534,7 @@ class Ledger:
 
     def append_transfer(
         self,
-        asof: date,
+        asof: AsOf,
         stage: Stage,
         from_sleeve: str,
         to_sleeve: str,

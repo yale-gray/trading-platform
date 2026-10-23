@@ -142,7 +142,10 @@ def available_cash(
     markets: Mapping[str, SymbolMarket],
     costs: Mapping[AssetClass, CostConfig],
 ) -> Decimal:
-    """``sleeve_cash - reserved_cash`` (no borrowing from other sleeves)."""
+    """``settled sleeve cash - reserved_cash`` (no borrowing from other sleeves).
+
+    On a T+1 cash account (ADR-0001 A21) unsettled SELL proceeds do not count.
+    """
     with money_context():
-        cash = next(s.cash for s in snapshot.sleeves if s.sleeve_id == sleeve_id)
-        return cash - reserved_cash(sleeve_id, pending, markets, costs)
+        sl = next(s for s in snapshot.sleeves if s.sleeve_id == sleeve_id)
+        return sl.cash - sl.unsettled - reserved_cash(sleeve_id, pending, markets, costs)

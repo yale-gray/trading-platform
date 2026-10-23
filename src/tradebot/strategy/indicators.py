@@ -184,6 +184,19 @@ def atr(high: pd.Series, low: pd.Series, close: pd.Series, n: int) -> pd.Series:
     return _series(_wilder(tr, n), high)
 
 
+def devatr(high: pd.Series, low: pd.Series, close: pd.Series, n: int, atr_n: int = 14) -> pd.Series:
+    """Distance of the close from its n-bar average in ATR units: ``(close - SMA(close, n)) / ATR``.
+
+    Negative = below the average (a dip of ``-k`` means "k ATRs below"). NaN where the ATR is 0.
+    First valid bar: ``max(n - 1, atr_n)``. Same input rules as :func:`atr`.
+    """
+    _check_n(n)
+    avg = sma(close, n)
+    rng = atr(high, low, close, atr_n)
+    dist = (_as_float(close) - avg) / rng.where(rng > 0.0)
+    return _unnamed(dist)
+
+
 def vol(x: pd.Series, n: int) -> pd.Series:
     """Sample std (ddof=1) of the last n simple returns, not annualised.
     First valid bar: n.
@@ -202,5 +215,6 @@ INDICATORS: dict[str, Callable] = {
     "macd": macd,
     "bbands": bbands,
     "atr": atr,
+    "devatr": devatr,
     "vol": vol,
 }

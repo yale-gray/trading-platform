@@ -9,11 +9,17 @@ so a restore can verify the replay against the stored values.
 
 from __future__ import annotations
 
-from datetime import date
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_serializer
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    SerializerFunctionWrapHandler,
+    field_serializer,
+    model_serializer,
+)
 
+from tradebot.portfolio.asof import AsOf
 from tradebot.portfolio.config import EngineConfig
 from tradebot.portfolio.models import Dec, LedgerEvent
 from tradebot.portfolio.rebalance import RebalancePlan
@@ -34,7 +40,7 @@ class PositionState(BaseModel):
     symbol: str
     qty: Dec
     cost_basis: Dec
-    entry_asof: date
+    entry_asof: AsOf
     high_water_close: Dec | None = None
     stop_level: Dec | None = None
 
@@ -52,7 +58,7 @@ class EngineState(BaseModel):
     next_order_n: int
     next_transfer_n: int
     next_seq: int
-    last_processed_asof: date | None
+    last_processed_asof: AsOf | None
     kill_state: dict[str, Any]
     stop_state: dict[str, Any]
     last_rebalance_month: str | None
@@ -61,6 +67,10 @@ class EngineState(BaseModel):
     last_vol20: dict[str, Dec]
     cash: dict[str, Dec]
     positions: dict[str, list[PositionState]]
+    # T+1 accounts only: SELL proceeds still unsettled at ``last_processed_asof`` (derived from the
+    # ledger; stored so a restore can cross-check). Omitted from the JSON while empty, so daily
+    # states are byte-identical to those written before A21.
+    unsettled: dict[str, Dec] = {}
 
     @field_serializer("config")
     def _serialize_config(self, config: EngineConfig) -> dict[str, Any]:
@@ -70,6 +80,13 @@ class EngineState(BaseModel):
             sleeve["allowed_asset_classes"] = sorted(sleeve["allowed_asset_classes"])
         data["costs"] = dict(sorted(data["costs"].items()))
         return data  # type: ignore[no-any-return]
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_unsettled(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data: dict[str, Any] = handler(self)
+        if not self.unsettled:
+            data.pop("unsettled", None)
+        return data
 
     def to_json(self) -> str:
         """Canonical JSON text of the state."""

@@ -4,6 +4,11 @@ A strategy is one sleeve's rules, either ``kind: rotation`` (rank a universe and
 or ``kind: rules`` (per-symbol entry/exit conditions). Any numeric field may be a literal or a
 ``$param`` reference; :meth:`resolve` substitutes parameters without mutating the original.
 
+Day trading (ADR-0001 A21): ``timeframe: 15m`` strategies work on 15-minute bars, indicator
+periods are then *bars*, ``schedule: {freq: bar}`` decides on every bar, and the
+``{session: ...}`` operands read per-session values (bar index, opening range). A daily
+strategy omits ``timeframe`` and serialises exactly as before.
+
 ``STRATEGIES`` (the three built-in sleeves, keyed by id) and ``load_strategy`` /
 ``dump_strategy`` are served lazily from :mod:`tradebot.strategy.io` to avoid an import cycle.
 """
@@ -20,9 +25,11 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     StringConstraints,
     TypeAdapter,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -38,7 +45,7 @@ PosNum = Annotated[float, Field(gt=0)] | Param  # number > 0 (stop mult) or "$na
 _STRICT = ConfigDict(extra="forbid", populate_by_name=True)
 
 # Indicators with a single output vs. multiple named output columns.
-_SINGLE = {"sma", "ema", "ret", "rsi", "atr", "vol"}
+_SINGLE = {"sma", "ema", "ret", "rsi", "atr", "vol", "devatr"}
 _FIELDS = {
     "macd": {"macd", "signal", "hist"},
     "bbands": {"mid", "upper", "lower", "pctb", "bandwidth"},
@@ -88,6 +95,33 @@ class PosOperand(BaseModel):
     pos: Literal["bars_held"]
 
 
+class SessionOperand(BaseModel):
+    """``{session: ...}``: a value tied to the trading session of an intraday strategy.
+
+    * ``bar_index``: 0-based index of the bar within its session (0 = the 09:30 bar);
+    * ``open``: the session's first open;
+    * ``range_high`` / ``range_low``: highest high / lowest low of the session's first ``bars``
+      bars (the opening range). NaN until the bar that completes the range
+      (``bar_index >= bars - 1``), then fixed for the rest of the session. Causal.
+
+    Only meaningful for ``timeframe: 15m`` (sessions are New York trading days).
+    """
+
+    model_config = _STRICT
+    session: Literal["bar_index", "open", "range_high", "range_low"]
+    bars: Period | None = None
+    symbol: str | None = None
+
+    @model_validator(mode="after")
+    def _check(self) -> SessionOperand:
+        ranged = self.session.startswith("range_")
+        if ranged and self.bars is None:
+            raise ValueError(f"session {self.session!r} requires 'bars'")
+        if not ranged and self.bars is not None:
+            raise ValueError(f"session {self.session!r} does not take 'bars'")
+        return self
+
+
 class IndOperand(BaseModel):
     """``{ind: <name>, period: n, of: close, ...}``; name must be a key of ``INDICATORS``."""
 
@@ -117,6 +151,7 @@ class IndOperand(BaseModel):
             "ema": {"period"},
             "rsi": {"period"},
             "atr": {"period"},
+            "devatr": {"period"},
             "vol": {"period"},
             "ret": {"period", "skip"},
             "macd": {"fast", "slow", "signal", "field"},
@@ -132,7 +167,7 @@ class IndOperand(BaseModel):
         return self
 
 
-Operand = float | Param | PriceOperand | PosOperand | IndOperand
+Operand = float | Param | PriceOperand | PosOperand | IndOperand | SessionOperand
 
 
 # --------------------------------------------------------------------------- conditions
@@ -195,10 +230,13 @@ for _m in (AllOf, AnyOf, Not):
 
 
 class Schedule(BaseModel):
-    """When decisions are made (derived from the bar index only)."""
+    """When decisions are made (derived from the bar index only).
+
+    ``bar`` = every bar (``timeframe: 15m`` only); ``daily`` = every daily bar.
+    """
 
     model_config = _STRICT
-    freq: Literal["daily", "weekly", "monthly"]
+    freq: Literal["daily", "weekly", "monthly", "bar"]
 
 
 class StopRequest(BaseModel):
@@ -230,8 +268,32 @@ class Fallback(BaseModel):
 
 
 class Position(BaseModel):
+    """Per-symbol weight (fraction of sleeve capital) and an optional cap on open positions.
+
+    ``max_positions`` (needs ``rank``): at most that many symbols are held at once; held
+    symbols keep their slot until their exit fires, free slots go to the best-ranked entry
+    candidates. ``weight: equal`` then means ``1 / max_positions`` instead of ``1 / universe``.
+    """
+
     model_config = _STRICT
     weight: Literal["equal"] | float | Param = "equal"
+    max_positions: Period | None = None
+    rank: Rank | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_cap(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Uncapped positions serialise as before the cap existed (config hashes stay stable)."""
+        data: dict[str, Any] = handler(self)
+        for key in ("max_positions", "rank"):
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
+
+    @model_validator(mode="after")
+    def _cap_needs_rank(self) -> Position:
+        if (self.max_positions is None) != (self.rank is None):
+            raise ValueError("position 'max_positions' and 'rank' must be given together")
+        return self
 
 
 # --------------------------------------------------------------------------- helpers
@@ -286,6 +348,11 @@ def _map_operand(o: Any, fn: SlotFn) -> Any:
             if key in out:
                 out[key] = _slot(out[key], kind, fn)
         return out
+    if isinstance(o, dict) and "session" in o:
+        out = dict(o)
+        if "bars" in out:
+            out["bars"] = _slot(out["bars"], "period", fn)
+        return out
     return _slot(o, "num", fn)
 
 
@@ -332,11 +399,15 @@ def _map_params(data: dict[str, Any], fn: SlotFn) -> dict[str, Any]:
             }
             for st in out["stops"]
         ]
-    if "position" in out and "weight" in out["position"]:
-        out["position"] = {
-            **out["position"],
-            "weight": _slot(out["position"]["weight"], "num", fn),
-        }
+    if "position" in out:
+        pos = dict(out["position"])
+        if "weight" in pos:
+            pos["weight"] = _slot(pos["weight"], "num", fn)
+        if "max_positions" in pos:
+            pos["max_positions"] = _slot(pos["max_positions"], "period", fn)
+        if "rank" in pos:
+            pos["rank"] = {**pos["rank"], "by": _map_operand(pos["rank"]["by"], fn)}
+        out["position"] = pos
     return out
 
 
@@ -392,6 +463,8 @@ def _lookback(op: dict[str, Any]) -> int:
         return int(op.get("slow", 26)) + int(op.get("signal", 9))
     if name == "bbands":
         return int(op.get("period", 20))
+    if name == "devatr":
+        return max(int(op["period"]), 14)
     return int(op["period"]) + (int(op.get("skip") or 0) if name == "ret" else 0)
 
 
@@ -407,17 +480,34 @@ class _StrategyBase(BaseModel):
     name: str
     description: str = ""
     asset_class: Literal["equity", "crypto"]
+    timeframe: Literal["1d", "15m"] = "1d"
     parameters: dict[str, float] = {}
     constraints: list[str] = []
     universe: list[str] = Field(min_length=1)
     schedule: Schedule
     stops: list[StopRequest] = []
 
+    @model_serializer(mode="wrap")
+    def _omit_daily_timeframe(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """A daily strategy serialises without ``timeframe`` (hashes/files predate the field)."""
+        data: dict[str, Any] = handler(self)
+        if self.timeframe == "1d":
+            data.pop("timeframe", None)
+        return data
+
     # -- subclass hooks -----------------------------------------------------
     def _body_dump(self) -> dict[str, Any]:
         """Dump of everything except header/parameters/constraints (where $refs live)."""
         d = self.model_dump(mode="json", by_alias=True, exclude_none=True)
-        for k in ("parameters", "constraints", "schema_version", "id", "name", "description"):
+        for k in (
+            "parameters",
+            "constraints",
+            "schema_version",
+            "id",
+            "name",
+            "description",
+            "timeframe",
+        ):
             d.pop(k, None)
         return d
 
@@ -449,6 +539,19 @@ class _StrategyBase(BaseModel):
         wrong = sorted(s for s in symbols if asset_class_of(s) != self.asset_class)
         if wrong:
             raise ValueError(f"symbols {wrong} are not of asset_class {self.asset_class!r}")
+
+        # timeframe / schedule (ADR-0001 A21)
+        if self.timeframe == "15m":
+            if self.asset_class != "equity":
+                raise ValueError("timeframe '15m' is for equities only")
+            if self.schedule.freq == "daily":
+                raise ValueError("a 15m strategy schedules by 'bar', 'weekly' or 'monthly'")
+        elif self.schedule.freq == "bar":
+            raise ValueError("schedule 'bar' needs timeframe '15m'")
+        if self.timeframe != "15m" and any(
+            isinstance(d, dict) and "session" in d for d in _walk(body)
+        ):
+            raise ValueError("'session' operands need timeframe '15m'")
 
         # constraints
         for expr in self.constraints:

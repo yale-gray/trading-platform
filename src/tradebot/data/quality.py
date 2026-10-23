@@ -17,6 +17,7 @@ import pandas as pd
 
 from tradebot.data.calendar import last_closed_bar_date, sessions
 from tradebot.data.errors import DataQualityError
+from tradebot.data.intraday import bar_opens, complete_mask, session_date
 from tradebot.data.types import BAR_COLUMNS
 
 logger = logging.getLogger(__name__)
@@ -196,6 +197,110 @@ def validate_bars(
     if errors:
         raise DataQualityError(f"{symbol}: " + "; ".join(errors))
 
+    clean = work[list(BAR_COLUMNS)].copy()
+    report.n_bars = len(clean)
+    return clean, report
+
+
+_OUTLIER_INTRADAY = 0.25  # abs 15m close-to-close move above this is flagged
+
+
+def validate_intraday_bars(
+    df: pd.DataFrame, symbol: str, now: datetime
+) -> tuple[pd.DataFrame, QualityReport]:
+    """Validate a fetched 15m frame; same contract as :func:`validate_bars`.
+
+    Intraday rule (ADR-0001 A21): **structural** defects are hard failures, **market-structure**
+    irregularities are warnings.
+
+    * Hard (``DataQualityError``): bad index/columns/dtypes, unsorted index, non-positive, NaN
+      or infinite prices, OHLC violations, negative/NaN/infinite volume.
+    * Dropped with a warning: duplicates (keep last), bars not complete at ``now``, and bars
+      that are not regular-session opens (extended hours, holidays, early-close tails).
+    * Warning only: missing bars inside a session (trading halts, thin names with no trades in
+      a 15-minute window; listed in ``report.gaps`` as the affected session dates), and
+      15-minute moves above 25 % (``report.outliers``). Zero-volume bars are not flagged.
+    """
+    if not isinstance(df.index, pd.DatetimeIndex) or df.index.tz is None:
+        raise DataQualityError(f"{symbol}: index must be a tz-aware DatetimeIndex")
+    if str(df.index.tz) != "UTC":
+        raise DataQualityError(f"{symbol}: index must be UTC, got {df.index.tz}")
+    work = df.drop(columns=[c for c in _METADATA_COLUMNS if c in df.columns])
+    if list(work.columns) != list(BAR_COLUMNS):
+        raise DataQualityError(
+            f"{symbol}: columns must be exactly {list(BAR_COLUMNS)}, got {list(work.columns)}"
+        )
+    wrong_dtype = [c for c in BAR_COLUMNS if work[c].dtype != "float64"]
+    if wrong_dtype:
+        raise DataQualityError(f"{symbol}: columns not float64: {wrong_dtype}")
+    if not work.index.is_monotonic_increasing:
+        raise DataQualityError(f"{symbol}: index is not sorted ascending")
+
+    report = QualityReport(symbol=symbol, n_bars=0)
+    dup = work.index.duplicated(keep="last")
+    if dup.any():
+        report.duplicates_dropped = int(dup.sum())
+        _warn(report, f"dropped {report.duplicates_dropped} duplicate timestamp(s)")
+        work = work[~dup]
+
+    if len(work):
+        incomplete = ~complete_mask(work.index, now)
+        if incomplete.any():
+            _warn(report, f"dropped {int(incomplete.sum())} in-progress bar(s)")
+            work = work[~incomplete]
+    if len(work):
+        first_d, last_d = session_date(work.index[0]), session_date(work.index[-1])
+        expected = bar_opens(first_d, last_d)
+        off = ~work.index.isin(expected)
+        if off.any():
+            _warn(report, f"dropped {int(off.sum())} bar(s) outside regular-session bar opens")
+            work = work[~off]
+
+    errors: list[str] = []
+    prices = work[list(_PRICE_COLUMNS)]
+    inf_price = np.isinf(prices).any(axis=1)
+    bad_price = (prices.isna() | (prices <= 0)).any(axis=1) | inf_price
+    if (bad_price & ~inf_price).any():
+        errors.append(f"{int((bad_price & ~inf_price).sum())} row(s) with non-positive/NaN price")
+    if inf_price.any():
+        errors.append(f"{int(inf_price.sum())} row(s) with infinite price")
+    body_low = work[["open", "close"]].min(axis=1)
+    body_high = work[["open", "close"]].max(axis=1)
+    bad_ohlc = ~bad_price & ((work["low"] > body_low) | (work["high"] < body_high))
+    if bad_ohlc.any():
+        errors.append(f"{int(bad_ohlc.sum())} row(s) violating OHLC ordering")
+    bad_volume = work["volume"].isna() | (work["volume"] < 0) | np.isinf(work["volume"])
+    if bad_volume.any():
+        errors.append(f"{int(bad_volume.sum())} row(s) with negative, NaN or infinite volume")
+
+    if len(work):
+        # Missing bars between the first and last bar of each session present: warn only.
+        expected_all = bar_opens(session_date(work.index[0]), session_date(work.index[-1]))
+        day_set = work.index.tz_convert("America/New_York").normalize().unique()
+        in_days = expected_all[
+            expected_all.tz_convert("America/New_York").normalize().isin(day_set)
+        ]
+        lo, hi = work.index[0], work.index[-1]
+        in_days = in_days[(in_days >= lo) & (in_days <= hi)]
+        missing = in_days.difference(work.index)
+        if len(missing):
+            report.gaps = sorted(
+                {ts.date() for ts in missing.tz_convert("America/New_York").normalize().unique()}
+            )
+            _warn(
+                report,
+                f"{len(missing)} missing 15m bar(s) in {len(report.gaps)} session(s) "
+                f"(halts or no trades): {_fmt_dates(report.gaps)}",
+            )
+        returns = work["close"] / work["close"].shift(1) - 1.0
+        big = (returns.abs() > _OUTLIER_INTRADAY).to_numpy()
+        for ts in work.index[big]:
+            move = float(returns.loc[ts])
+            report.outliers.append((session_date(ts), move))
+            _warn(report, f"outlier 15m move at {ts.isoformat()}: {move:+.1%}")
+
+    if errors:
+        raise DataQualityError(f"{symbol}: " + "; ".join(errors))
     clean = work[list(BAR_COLUMNS)].copy()
     report.n_bars = len(clean)
     return clean, report

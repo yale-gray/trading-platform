@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from tradebot.config import Settings
     from tradebot.data import MarketData
 
-PRESETS = ("fund", "smart", "bench_spy", "bench_btc")
+PRESETS = ("fund", "smart", "daytrading", "bench_spy", "bench_spy_15m", "bench_btc")
 MODES = ("single", "walk_forward", "sensitivity")
 
 
@@ -89,7 +89,14 @@ def _open_db(settings: Settings, *, create: bool = True) -> Any:
 
 
 def _cmd_data_refresh(args: argparse.Namespace) -> int:
-    reports = _market_data(_settings()).refresh(args.symbols or None)
+    if args.timeframe == "15m":
+        from tradebot.data.types import Timeframe
+
+        reports = _market_data(_settings()).refresh(
+            args.symbols or None, timeframe=Timeframe.M15, start=args.start
+        )
+    else:
+        reports = _market_data(_settings()).refresh(args.symbols or None)
     return _print_reports(reports, fail_on_error=False)
 
 
@@ -159,6 +166,7 @@ def _cmd_portfolio_create(args: argparse.Namespace) -> int:
     from tradebot.runner import (
         benchmark_definition,
         create_portfolio,
+        daytrading_definition,
         fund_definition,
         smart_definition,
     )
@@ -171,14 +179,26 @@ def _cmd_portfolio_create(args: argparse.Namespace) -> int:
     start = args.start
 
     if args.preset:
-        symbol = {"bench_spy": "SPY", "bench_btc": "BTC/USD"}.get(args.preset)
+        symbol = {"bench_spy": "SPY", "bench_spy_15m": "SPY", "bench_btc": "BTC/USD"}.get(
+            args.preset
+        )
         markets = ["equity"] if symbol == "SPY" else ["crypto"] if symbol else ["crypto", "equity"]
         start = start or _latest_complete_bar(markets, now, settings.equity_close_delay_min)
         if symbol is not None:
-            defn = benchmark_definition(symbol, start, name=args.name)
+            defn = benchmark_definition(
+                symbol,
+                start,
+                name=args.name,
+                timeframe="15m" if args.preset == "bench_spy_15m" else "1d",
+            )
         elif args.preset == "smart":
             try:
                 defn = smart_definition(start, name=args.name or "smart_investing")
+            except RunnerError as exc:
+                return _err(str(exc))
+        elif args.preset == "daytrading":
+            try:
+                defn = daytrading_definition(start, name=args.name or "day_trading")
             except RunnerError as exc:
                 return _err(str(exc))
         else:
@@ -204,6 +224,10 @@ def _cmd_portfolio_create(args: argparse.Namespace) -> int:
         from tradebot.runner.bootstrap import SMART_DESCRIPTION
 
         print(SMART_DESCRIPTION)
+    if args.preset == "daytrading":
+        from tradebot.runner.bootstrap import DAYTRADING_DESCRIPTION
+
+        print(DAYTRADING_DESCRIPTION)
     return 0
 
 
@@ -471,6 +495,10 @@ def build_parser() -> argparse.ArgumentParser:
     d = group("data", "market data cache")
     c = d.add_parser("refresh", help="fetch the missing tail for each symbol")
     c.add_argument("--symbols", nargs="+", metavar="S")
+    c.add_argument("--timeframe", choices=["1d", "15m"], default="1d")
+    c.add_argument(
+        "--start", type=_date, default=None, help="first session to fetch (15m only, YYYY-MM-DD)"
+    )
     c.set_defaults(func=_cmd_data_refresh)
     c = d.add_parser("verify", help="check cache integrity and quality (nonzero exit on errors)")
     c.add_argument("--symbols", nargs="+", metavar="S")

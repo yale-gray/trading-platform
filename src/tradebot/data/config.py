@@ -19,3 +19,9 @@ class DataConfig:
     overlap_bars: int = 10
     equity_close_buffer_min: int = 60
     offline: bool = False  # True => never call providers (tests, CI)
+    # 15-minute intraday bars (ADR-0001 A21)
+    intraday_history_feed: str = "sip"  # cached history: full consolidated tape
+    intraday_live_feed: str | None = "iex"  # in-memory live tail on read; None disables
+    sip_delay_min: int = 16  # free SIP plan refuses data newer than 15 min
+    intraday_overlap_bars: int = 26  # one regular session re-fetched for the restatement check
+    intraday_chunk_symbols: int = 10  # symbols per multi-symbol request group

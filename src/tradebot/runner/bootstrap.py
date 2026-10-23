@@ -8,7 +8,7 @@ operator action (the API ack never resets).
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import NamedTuple
@@ -39,6 +39,7 @@ from tradebot.strategy.io import STRATEGIES_DIR, dump_strategy, load_strategy
 __all__ = [
     "benchmark_definition",
     "create_portfolio",
+    "daytrading_definition",
     "fund_definition",
     "reset_kill_switch",
     "restore_context",
@@ -47,6 +48,9 @@ __all__ = [
 
 DEFAULT_HISTORY_DAYS = 1100
 """Calendar days of history before the inception bar (SMA200/ret126 warm-up with margin)."""
+
+INTRADAY_HISTORY_DAYS = 30
+"""Calendar days of 15m history before the inception bar (SMA130 is about 5 sessions)."""
 
 
 def fund_definition(
@@ -169,6 +173,96 @@ def smart_definition(
     )
 
 
+DAYTRADING_SLEEVES: tuple[tuple[str, str, str, Decimal], ...] = (
+    # (sleeve_id, display name, strategy file stem, target weight)
+    ("dip", "Day trading: dip buyer", "stocks_dt_dip", Decimal("0.50")),
+    ("breakout", "Day trading: opening-range breakout", "stocks_dt_breakout", Decimal("0.50")),
+)
+
+BARS_PER_SESSION = 26
+"""Regular-session 15-minute bars (09:30-16:00 ET); the kill-switch pause is counted in bars."""
+
+DAYTRADING_DESCRIPTION = (
+    f"day trading: $10,000 cash account on 15-minute bars of the {SP500_LABEL}; "
+    "50% dip buyer + 50% opening-range breakout, at most 5 positions each, everything sold "
+    "by the close, sale proceeds usable the next trading day (T+1), no PDT limit."
+)
+"""One-line preset description; carries the survivorship label (ADR-0001 A13, A21)."""
+
+
+def daytrading_definition(
+    start: date,
+    *,
+    data_start: date | None = None,
+    name: str = "day_trading",
+    engine: EngineConfig | None = None,
+    strategies_dir: Path | None = None,
+    benchmark: str | None = "bench_spy_15m",
+) -> PortfolioDef:
+    """The $10,000 day-trading cash account (ADR-0001 A21).
+
+    Two sleeves of 50% each, ``dip`` (``stocks_dt_dip``) and ``breakout``
+    (``stocks_dt_breakout``), both 15-minute rules over the current S&P 500, each holding at
+    most 5 equal-weight positions (10% of the account per position). Account settings:
+
+    * ``intraday_flatten``: every position is sold at the close of the session's last bar, so
+      nothing is held overnight;
+    * ``settlement="t1"``: a cash account. Sale proceeds fund BUYs from the next trading day, so
+      BUYs are sized from settled cash only. There is no pattern-day-trader limit;
+    * fractional shares (A20 default), 5 bps slippage a side, no fees (the repo default costs);
+    * the kill switch (A18) at the usual 20% drawdown, paused for 20 sessions = 520 bars (its
+      pause is counted in bars; one bar is 15 minutes);
+    * per-asset cap 25% of equity (a stock held by both sleeves is 20%).
+
+    ``engine`` replaces the generated config (tests). A missing strategy file raises
+    ``RunnerError`` naming the path.
+    """
+    from tradebot.risk.config import RiskConfig
+
+    root = strategies_dir or STRATEGIES_DIR
+    base = default_config()
+    eng = engine or EngineConfig(
+        initial_capital=Decimal("10000.00"),
+        sleeves=tuple(
+            SleeveConfig(
+                sleeve_id=sid,
+                name=label,
+                target_weight=weight,
+                vol_scaled=False,
+                allowed_asset_classes=frozenset({AssetClass.EQUITY}),
+            )
+            for sid, label, _stem, weight in DAYTRADING_SLEEVES
+        ),
+        risk=RiskConfig(kill_switch_pause_bars=20 * BARS_PER_SESSION),
+        costs={ac: CostConfig(**c.model_dump()) for ac, c in base.costs.items()},
+        intraday_flatten=True,
+        settlement="t1",
+    )
+    stems = {sid: stem for sid, _l, stem, _w in DAYTRADING_SLEEVES}
+    specs = []
+    for sc in eng.sleeves:
+        stem = stems.get(sc.sleeve_id)
+        if stem is None:
+            specs.append(SleeveSpec(sleeve_id=sc.sleeve_id, strategy=None))
+            continue
+        path = root / f"{stem}.yaml"
+        if not path.is_file():
+            raise RunnerError(
+                f"daytrading preset needs strategy file {path} for sleeve {sc.sleeve_id!r}, "
+                "but it does not exist"
+            )
+        specs.append(SleeveSpec(sleeve_id=sc.sleeve_id, strategy=load_strategy(path)))
+    return PortfolioDef(
+        name=name,
+        kind="fund",
+        engine=eng,
+        sleeves=tuple(specs),
+        start=start,
+        data_start=data_start or start - timedelta(days=INTRADAY_HISTORY_DAYS),
+        benchmark=benchmark,
+    )
+
+
 def benchmark_definition(
     symbol: str,
     start: date,
@@ -176,22 +270,30 @@ def benchmark_definition(
     data_start: date | None = None,
     name: str | None = None,
     engine: EngineConfig | None = None,
+    timeframe: str = "1d",
 ) -> PortfolioDef:
-    """Buy-and-hold ``symbol`` through the same engine (identical to ``run_with_benchmark``)."""
+    """Buy-and-hold ``symbol`` through the same engine (identical to ``run_with_benchmark``).
+
+    ``timeframe="15m"`` gives the benchmark of a day-trading portfolio (bars on its clock).
+    """
     base = engine or default_config()
     sid = "bh_crypto" if market_of(symbol) == "crypto" else "bh_equity"
     cfg = _bench_config(
         BacktestConfig(sleeves=[], start=start, end=start, engine=base),
         [(sid, Decimal(1), symbol)],
         Decimal(0),
+        timeframe,
     )
+    intraday = timeframe == "15m"
+    suffix = "_15m" if intraday else ""
+    history = INTRADAY_HISTORY_DAYS if intraday else DEFAULT_HISTORY_DAYS
     return PortfolioDef(
-        name=name or f"bench_{symbol.split('/')[0].lower()}",
+        name=name or f"bench_{symbol.split('/')[0].lower()}{suffix}",
         kind="benchmark",
         engine=cfg.engine,
         sleeves=tuple(cfg.sleeves),
         start=start,
-        data_start=data_start or start - timedelta(days=DEFAULT_HISTORY_DAYS),
+        data_start=data_start or start - timedelta(days=history),
     )
 
 
@@ -300,6 +402,13 @@ def restore_context(session: Session, portfolio: Portfolio) -> PortfolioContext:
     )
 
 
+def _bar_ts(asof: date) -> datetime:
+    """Stored ``bar_ts`` of an engine ``asof``: UTC midnight (daily) or the naive bar open (15m)."""
+    if isinstance(asof, datetime):
+        return asof.astimezone(UTC).replace(tzinfo=None)
+    return datetime(asof.year, asof.month, asof.day)
+
+
 def reset_kill_switch(
     db: Engine, portfolio_name: str, *, operator: str, note: str, now: datetime
 ) -> date:
@@ -322,7 +431,7 @@ def reset_kill_switch(
         new_events = list(ctx.engine.ledger)[ctx.n_ledger :]
         repo.append_ledger_events(s, p.id, new_events, ctx.sleeve_ids)
         snap = ctx.engine.snapshot()
-        bar_ts = datetime(asof.year, asof.month, asof.day)
+        bar_ts = _bar_ts(asof)
         repo.mirror_kill_switch(
             s,
             p.id,
@@ -385,6 +494,10 @@ def reset_from(
                 f"DATE must be after the last processed bar {rs.last_processed_bar_ts.date()}"
             )
         ctx = restore_context(s, p)
+        if ctx.defn.timeframe() == "15m":
+            raise RunnerError(
+                "reset-from is not supported for 15m portfolios yet (ADR-0001 A21 follow-up)"
+            )
         asof = ctx.engine.last_processed_asof
         assert asof is not None
         cancelled = [

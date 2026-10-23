@@ -74,6 +74,14 @@ class PortfolioDef:
         """Markets (``equity`` / ``crypto``) of the required symbols, sorted."""
         return sorted({market_of(s) for s in self.required_symbols()})
 
+    def timeframe(self) -> str:
+        """``"15m"`` if any sleeve strategy runs on 15-minute bars (ADR-0001 A21), else ``"1d"``."""
+        return (
+            "15m"
+            if any(s.strategy and s.strategy.timeframe == "15m" for s in self.sleeves)
+            else "1d"
+        )
+
     def strategy_sleeve_ids(self) -> list[str]:
         """Sleeve ids that carry a strategy (the TargetBook ids), sorted."""
         return sorted(s.sleeve_id for s in self.sleeves if s.strategy is not None)
@@ -141,5 +149,5 @@ class PortfolioTick:
 
     portfolio: str
     status: TickStatus
-    processed: list[date] = field(default_factory=list)
+    processed: list[date | datetime] = field(default_factory=list)  # bar dates / 15m bar opens
     error: str | None = None

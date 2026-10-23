@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     max_catchup_bars: int = Field(default=400, ge=1)
     equity_close_delay_min: int = 30
     checkpoint_keep: int = Field(default=30, ge=1)
+    # Alpaca market data keys (data only, never trading). Read from the un-prefixed
+    # names in `.env`; held as SecretStr so they never show up in repr or dumps.
+    alpaca_key_id: SecretStr | None = Field(default=None, validation_alias="APCA_API_KEY_ID")
+    alpaca_secret_key: SecretStr | None = Field(
+        default=None, validation_alias="APCA_API_SECRET_KEY"
+    )
 
     @field_validator("log_level", mode="before")
     @classmethod

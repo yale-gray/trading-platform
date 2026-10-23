@@ -22,5 +22,10 @@ def test_every_universe_ticker_is_a_string(path) -> None:  # noqa: ANN001
 
 def test_sp500_detection_is_by_spec_id_prefix() -> None:
     ids = {load_strategy(p).id for p in FILES}
-    assert {i for i in ids if is_sp500_spec(i)} == {"stocks_momentum", "stocks_momentum_cash"}
+    assert {i for i in ids if is_sp500_spec(i)} == {
+        "stocks_momentum",
+        "stocks_momentum_cash",
+        "stocks_dt_dip",
+        "stocks_dt_breakout",
+    }
     assert "survivorship" in SP500_LABEL

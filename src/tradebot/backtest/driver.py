@@ -4,7 +4,14 @@
 runner: process the bar in the engine (fills, marks, stops, rebalance decision), then,
 for each strategy sleeve, evaluate the strategy on decision bars and submit target
 weights on decision bars or ``rebalance_planned`` bars. Signals made at ``ts`` therefore
-fill at the next bar. ``ts.date()`` is converted to ``asof`` here and nowhere else.
+fill at the next bar. ``ts`` is converted to ``asof`` here and nowhere else: ``ts.date()`` for
+daily strategies, the UTC bar-open ``datetime`` for 15-minute ones (ADR-0001 A21).
+
+Intraday mode (``timeframe: 15m``): the driver knows the session structure from the calendar of
+the bars. On a session's last bar it tells the engine (``session_end=True``, which flattens an
+``intraday_flatten`` account at that bar's close) and submits no new targets, and it clears the
+target books so nothing is bought into the close. With 500 symbols it runs the engine in
+``lean`` mode, building ``Bar`` objects only for symbols the engine asks about.
 """
 
 from __future__ import annotations
@@ -12,7 +19,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -20,7 +27,9 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict
 
+from tradebot.data.calendar import bar_close_time
 from tradebot.data.symbols import asset_class, normalize_symbol
+from tradebot.portfolio.asof import AsOf, asof_timestamp
 from tradebot.portfolio.config import EngineConfig
 from tradebot.portfolio.engine import BarResult, PortfolioEngine, TargetResult
 from tradebot.portfolio.models import EventType
@@ -36,6 +45,8 @@ if TYPE_CHECKING:
 __all__ = ["BarDriver", "StepResult", "TargetBook", "build_engine_config"]
 
 ATR_PERIOD = 14
+BAR_15M = pd.Timedelta(minutes=15)
+_NY = "America/New_York"
 
 
 # ---------------------------------------------------------------------------- TargetBook
@@ -85,6 +96,12 @@ class TargetBook:
         self._weights[signals.sleeve_id] = book
         self._ts[signals.sleeve_id] = pd.Timestamp(signals.asof)
 
+    def clear(self, sleeve_id: str) -> None:
+        """Drop the sleeve's target weights (end of an intraday session); keeps its stamp."""
+        if sleeve_id not in self._weights:
+            raise KeyError(f"unknown sleeve {sleeve_id!r}")
+        self._weights[sleeve_id] = {}
+
     def weights(self, sleeve_id: str) -> dict[str, float]:
         """Copy of the positive target weights (``{}`` if no decision yet)."""
         return dict(self._weights[sleeve_id])
@@ -123,7 +140,7 @@ class StepResult(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    asof: date
+    asof: AsOf
     ts: pd.Timestamp
     bar_result: BarResult
     signals: dict[str, SignalSet] = {}  # sleeves that were on a decision bar
@@ -140,7 +157,8 @@ def _classes(spec: StrategySpec) -> list[str]:
 def build_engine_config(base: EngineConfig, sleeves: Sequence[SleeveSpec]) -> EngineConfig:
     """Copy of ``base`` with each sleeve's ATR-stop multiple set (``None`` when no stop).
 
-    Raises ``ValueError`` if the sleeve ids differ from ``base``, a stop period is not 14,
+    Raises ``ValueError`` if the sleeve ids differ from ``base``, ``intraday_flatten`` is set
+    but a strategy is not a 15m ``bar``-schedule one, a stop period is not 14,
     a strategy has more than one stop, a universe symbol is outside the sleeve's allowed
     asset classes, or a rules sleeve's ``len(universe) * weight`` exceeds 1.
     """
@@ -157,6 +175,12 @@ def build_engine_config(base: EngineConfig, sleeves: Sequence[SleeveSpec]) -> En
         mult: Decimal | None = None
         if strategy is not None:
             resolved = strategy.resolve()
+            if base.intraday_flatten and (
+                resolved.timeframe != "15m" or resolved.schedule.freq != "bar"
+            ):
+                raise ValueError(
+                    f"{sc.sleeve_id}: intraday_flatten needs a 15m strategy scheduled by 'bar'"
+                )
             if len(resolved.stops) > 1:
                 raise ValueError(f"{sc.sleeve_id}: more than one stop is not supported")
             if resolved.stops:
@@ -176,11 +200,16 @@ def build_engine_config(base: EngineConfig, sleeves: Sequence[SleeveSpec]) -> En
                     )
             if isinstance(resolved, RulesSpec):
                 w = resolved.position.weight
-                per = 1.0 / len(resolved.universe) if w == "equal" else float(w)
-                if len(resolved.universe) * per > 1.0 + 1e-9:
+                slots = (
+                    int(resolved.position.max_positions)  # type: ignore[arg-type]
+                    if resolved.position.max_positions is not None
+                    else len(resolved.universe)
+                )
+                per = 1.0 / slots if w == "equal" else float(w)
+                if slots * per > 1.0 + 1e-9:
+                    what = "len(universe)" if slots == len(resolved.universe) else "max_positions"
                     raise ValueError(
-                        f"{sc.sleeve_id}: len(universe) * weight = "
-                        f"{len(resolved.universe) * per:.4f} exceeds 1"
+                        f"{sc.sleeve_id}: {what} * weight = {slots * per:.4f} exceeds 1"
                     )
         new.append(sc.model_copy(update={"trailing_stop_atr_mult": mult}))
     return base.model_copy(update={"sleeves": tuple(new)})
@@ -200,6 +229,37 @@ def _opt(x: float) -> float | None:
     return None if x is None or not math.isfinite(x) else float(x)
 
 
+class _LazyBars(Mapping[str, Bar]):
+    """The bars of one timestamp, built on demand (the engine only probes the symbols it needs)."""
+
+    def __init__(self, driver: BarDriver, ts: pd.Timestamp) -> None:
+        self._d = driver
+        self._ts = ts
+
+    def __contains__(self, sym: object) -> bool:
+        return isinstance(sym, str) and self._d._row(sym, self._ts) >= 0
+
+    def __getitem__(self, sym: str) -> Bar:
+        bar = self._d._bar(sym, self._ts)
+        if bar is None:
+            raise KeyError(sym)
+        return bar
+
+    def last_known(self, sym: str) -> Bar | None:
+        """The symbol's latest bar at or before this timestamp that the run has processed.
+
+        The engine marks a targeted symbol that has no bar *now* with this, exactly as full
+        marking would have: it kept the close of the symbol's last processed bar.
+        """
+        return self._d._last_bar(sym, self._ts)
+
+    def __iter__(self) -> Iterator[str]:
+        return (s for s in self._d._symbols if s in self)
+
+    def __len__(self) -> int:
+        return sum(1 for _ in self)
+
+
 class BarDriver:
     """The one per-bar loop (backtest and runner). Compiles a fresh strategy per driver."""
 
@@ -211,6 +271,7 @@ class BarDriver:
         *,
         start: date,
         book: TargetBook | None = None,
+        lean: bool | None = None,
     ) -> None:
         self._engine = engine
         self._start = start
@@ -237,24 +298,63 @@ class BarDriver:
             self._slots.append(_Slot(sid, compiled, feats))
             required.update(compiled.required)
         self._symbols = sorted(required)
-        # Causal per-symbol arrays; vol20/atr14 are attached to each Bar (ADR D4).
+        timeframes = {self._slot_timeframe(sl) for sl in self._slots}
+        if len(timeframes) > 1:
+            raise ValueError(f"strategies mix timeframes {sorted(timeframes)}")
+        self._intraday = timeframes == {"15m"}
+        self._lean = self._intraday if lean is None else lean
+        self._flatten = bool(getattr(getattr(engine, "config", None), "intraday_flatten", False))
+        # Causal per-symbol arrays; vol20/atr14 are attached to each Bar (ADR D4). Built per
+        # symbol on first use: a 500-symbol intraday run only ever needs the traded ones.
         self._arrays: dict[str, dict[str, np.ndarray]] = {}
         self._index: dict[str, pd.DatetimeIndex] = {}
-        # ts -> row position per symbol: O(1) lookup per bar (get_indexer per symbol per bar
-        # dominated the run time at ~500 symbols).
-        self._pos: dict[str, dict[pd.Timestamp, int]] = {}
+        self._ns: dict[str, np.ndarray] = {}  # bar-open nanoseconds per symbol (sorted)
         for sym in self._symbols:
-            df = self._frames[sym]
-            self._index[sym] = df.index
-            self._pos[sym] = {t: i for i, t in enumerate(df.index)}
-            self._arrays[sym] = {
-                "open": df["open"].to_numpy(dtype="float64"),
-                "high": df["high"].to_numpy(dtype="float64"),
-                "low": df["low"].to_numpy(dtype="float64"),
-                "close": df["close"].to_numpy(dtype="float64"),
-                "vol20": indicators.vol(df["close"], 20).to_numpy(),
-                "atr14": indicators.atr(df["high"], df["low"], df["close"], ATR_PERIOD).to_numpy(),
-            }
+            self._index[sym] = self._frames[sym].index
+            self._ns[sym] = self._frames[sym].index.asi8
+        cal: pd.DatetimeIndex | None = None
+        for sym in self._symbols:
+            cal = self._index[sym] if cal is None else cal.union(self._index[sym])
+        self._cal: pd.DatetimeIndex = (
+            pd.DatetimeIndex([], tz="UTC") if cal is None else pd.DatetimeIndex(cal).sort_values()
+        )
+        self._session_end_ns: set[int] = (
+            self._find_session_ends(self._cal) if self._intraday else set()
+        )
+
+    @staticmethod
+    def _slot_timeframe(slot: _Slot) -> str:
+        return str(slot.compiled.spec.timeframe)
+
+    @staticmethod
+    def _find_session_ends(cal: pd.DatetimeIndex) -> set[int]:
+        """Bar-open ns of each session's last bar.
+
+        A session's last bar is the last timestamp of its New York day, except the final day of
+        the data: that one only counts when its last bar closes the exchange session (the data
+        may stop mid-day while a live run is under way). An early close is read from the XNYS
+        calendar; a day the calendar does not know is trusted as complete.
+        """
+        if len(cal) == 0:
+            return set()
+        days = cal.tz_convert(_NY).normalize()
+        ends: set[int] = set()
+        for k in range(len(cal)):
+            if k + 1 < len(cal) and days[k + 1] != days[k]:
+                ends.add(int(cal.asi8[k]))
+        last = len(cal) - 1
+        day = days[last].date()
+        try:
+            complete = cal[last] + BAR_15M >= pd.Timestamp(bar_close_time("SPY", day))
+        except ValueError:
+            complete = True
+        if complete:
+            ends.add(int(cal.asi8[last]))
+        return ends
+
+    def is_session_end(self, ts: pd.Timestamp) -> bool:
+        """True if ``ts`` is the last bar of its session (intraday mode only)."""
+        return int(pd.Timestamp(ts).value) in self._session_end_ns
 
     @property
     def book(self) -> TargetBook:
@@ -262,38 +362,79 @@ class BarDriver:
         return self._book
 
     def master_calendar(
-        self, end: date | None = None, after: date | None = None
+        self, end: date | None = None, after: AsOf | None = None
     ) -> pd.DatetimeIndex:
         """Sorted union of required symbols' timestamps in ``[start, end]``, dates > ``after``."""
-        cal: pd.DatetimeIndex | None = None
-        for sym in self._symbols:
-            cal = self._index[sym] if cal is None else cal.union(self._index[sym])
-        if cal is None:
-            return pd.DatetimeIndex([], tz="UTC")
+        cal = self._cal
+        if len(cal) == 0:
+            return cal
         dates = np.array([d for d in cal.date])
         keep = dates >= self._start
         if end is not None:
             keep &= dates <= end
         if after is not None:
-            keep &= dates > after
+            if isinstance(after, datetime):  # intraday engine: resume after a bar timestamp
+                keep &= cal > asof_timestamp(after)
+            else:
+                keep &= dates > after
         return pd.DatetimeIndex(cal[keep]).sort_values()
 
-    def _bars_at(self, ts: pd.Timestamp) -> dict[str, Bar]:
+    def _row(self, sym: str, ts: pd.Timestamp) -> int:
+        """Row of ``ts`` in ``sym``'s bars, or -1."""
+        ns = self._ns.get(sym)
+        if ns is None:
+            return -1
+        t = int(ts.value)
+        i = int(np.searchsorted(ns, t))
+        return i if i < len(ns) and ns[i] == t else -1
+
+    def _sym_arrays(self, sym: str) -> dict[str, np.ndarray]:
+        a = self._arrays.get(sym)
+        if a is None:
+            df = self._frames[sym]
+            a = self._arrays[sym] = {
+                "open": df["open"].to_numpy(dtype="float64"),
+                "high": df["high"].to_numpy(dtype="float64"),
+                "low": df["low"].to_numpy(dtype="float64"),
+                "close": df["close"].to_numpy(dtype="float64"),
+                "vol20": indicators.vol(df["close"], 20).to_numpy(),
+                "atr14": indicators.atr(df["high"], df["low"], df["close"], ATR_PERIOD).to_numpy(),
+            }
+        return a
+
+    def _last_bar(self, sym: str, ts: pd.Timestamp) -> Bar | None:
+        """Latest bar of ``sym`` at or before ``ts`` and on/after the run's first day, or None."""
+        ns = self._ns.get(sym)
+        if ns is None:
+            return None
+        i = int(np.searchsorted(ns, int(ts.value), side="right")) - 1
+        if i < 0 or self._index[sym][i].date() < self._start:
+            return None
+        return self._bar(sym, self._index[sym][i])
+
+    def _bar(self, sym: str, ts: pd.Timestamp) -> Bar | None:
+        i = self._row(sym, ts)
+        if i < 0:
+            return None
+        a = self._sym_arrays(sym)
+        return Bar(
+            symbol=sym,
+            open=float(a["open"][i]),
+            high=float(a["high"][i]),
+            low=float(a["low"][i]),
+            close=float(a["close"][i]),
+            vol20=_opt(a["vol20"][i]),
+            atr14=_opt(a["atr14"][i]),
+        )
+
+    def _bars_at(self, ts: pd.Timestamp) -> Mapping[str, Bar]:
+        if self._lean:
+            return _LazyBars(self, ts)
         out: dict[str, Bar] = {}
         for sym in self._symbols:
-            i = self._pos[sym].get(ts, -1)
-            if i < 0:
-                continue
-            a = self._arrays[sym]
-            out[sym] = Bar(
-                symbol=sym,
-                open=float(a["open"][i]),
-                high=float(a["high"][i]),
-                low=float(a["low"][i]),
-                close=float(a["close"][i]),
-                vol20=_opt(a["vol20"][i]),
-                atr14=_opt(a["atr14"][i]),
-            )
+            bar = self._bar(sym, ts)
+            if bar is not None:
+                out[sym] = bar
         return out
 
     def step(self, ts: pd.Timestamp) -> StepResult:
@@ -301,8 +442,20 @@ class BarDriver:
         ts = pd.Timestamp(ts)
         if ts.tzinfo is None:
             raise ValueError("ts must be tz-aware (UTC)")
-        asof = ts.date()  # the only Timestamp -> date conversion (ADR D1)
-        result = self._engine.process_bar(asof, self._bars_at(ts))
+        day = ts.date()
+        asof: AsOf = ts.to_pydatetime() if self._intraday else day  # the only conversion (ADR D1)
+        session_end = self._intraday and self.is_session_end(ts)
+        extra: dict[str, bool] = {}
+        if self._lean:
+            extra["lean"] = True
+        if session_end:
+            extra["session_end"] = True
+        result = self._engine.process_bar(asof, self._bars_at(ts), **extra)
+        if session_end and self._flatten:
+            # Positions were just sold at this close; buying now would carry overnight.
+            for sid in self._strategy_ids:
+                self._book.clear(sid)
+            return StepResult(asof=asof, ts=ts, bar_result=result, signals={}, targets={})
         snapshot = self._engine.snapshot()
         positions = {s.sleeve_id: s.positions for s in snapshot.sleeves}
         # After a kill-switch re-arm every sleeve gets one decision (monthly sleeves would
@@ -316,15 +469,13 @@ class BarDriver:
             force = rearmed or not self._book.has_decision(sid)
             decision = (
                 i >= 0
-                and asof >= self._start
+                and day >= self._start
                 and i >= slot.compiled.warmup_bars - 1
                 and (force or slot.compiled.is_decision_bar(ts, slot.feats))
             )
             if decision:
                 held = {
-                    p.symbol: HeldPosition(
-                        symbol=p.symbol, entry_ts=pd.Timestamp(p.entry_asof, tz="UTC")
-                    )
+                    p.symbol: HeldPosition(symbol=p.symbol, entry_ts=asof_timestamp(p.entry_asof))
                     for p in positions[sid]
                     if p.qty > 0 and p.entry_asof is not None
                 }
@@ -337,7 +488,7 @@ class BarDriver:
                 )
         return StepResult(asof=asof, ts=ts, bar_result=result, signals=signals, targets=targets)
 
-    def run(self, end: date | None = None, after: date | None = None) -> Iterator[StepResult]:
+    def run(self, end: date | None = None, after: AsOf | None = None) -> Iterator[StepResult]:
         """Step every master-calendar bar in order (backtest loop and runner catch-up).
 
         ``after`` defaults to the engine's ``last_processed_asof`` so a restored engine

@@ -15,10 +15,10 @@ A manual reset (CLI) ends the pause early.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any
 
+from tradebot.portfolio.asof import AsOf, asof_from_iso
 from tradebot.portfolio.money import from_text, money_context, q_ratio, to_text
 
 DEFAULT_THRESHOLD = Decimal("0.20")
@@ -55,7 +55,7 @@ class KillSwitch:
         self.peak_equity = initial_capital
         self.last_equity = initial_capital
         self.killed = False
-        self.tripped_asof: date | None = None
+        self.tripped_asof: AsOf | None = None
         self.resets: list[dict[str, str]] = []
 
     @property
@@ -72,7 +72,7 @@ class KillSwitch:
         with money_context():
             return q_ratio(Decimal(1) - equity / self.peak_equity)
 
-    def observe(self, equity: Decimal, asof: date) -> KillObservation:
+    def observe(self, equity: Decimal, asof: AsOf) -> KillObservation:
         """Process an end-of-day equity: raise peak, test the trip threshold.
 
         The test is exact: ``1 - equity/peak >= t`` iff ``equity <= peak*(1-t)``.
@@ -109,7 +109,7 @@ class KillSwitch:
             dd_q = q_ratio(dd) if dd >= 0 else Decimal("0E-10")
         return KillObservation(dd_q, self.peak_equity, tripped_now, self.killed)
 
-    def reset(self, operator: str, note: str, asof: date) -> None:
+    def reset(self, operator: str, note: str, asof: AsOf) -> None:
         """Manual reset (CLI only): clear the flag, peak = last observed equity."""
         if not self.killed:
             raise ValueError("kill switch not tripped; nothing to reset")
@@ -154,6 +154,6 @@ class KillSwitch:
         ks.last_equity = from_text(state["last_equity"])
         ks.killed = bool(state["killed"])
         ta = state["tripped_asof"]
-        ks.tripped_asof = None if ta is None else date.fromisoformat(ta)
+        ks.tripped_asof = None if ta is None else asof_from_iso(ta)
         ks.resets = [dict(r) for r in state["resets"]]
         return ks

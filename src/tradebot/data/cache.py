@@ -8,6 +8,11 @@ Layout (read unchanged from the committed fixtures)::
     <root>/<source>/<SYMBOL_FS>/gen-0001/bars-<sha8>.parquet   (after an append)
     <root>/<source>/<SYMBOL_FS>/quarantine/<ts>.parquet
 
+Intraday bars use a ``<source>/<timeframe>`` source key (``alpaca/15m``), so they live at
+``<root>/alpaca/15m/<SYMBOL_FS>/...`` and never mix with the daily layout. For such a source
+``gen.json`` ``first``/``last`` are full UTC timestamps (``%Y-%m-%dT%H:%M:%SZ``) and
+``meta.json`` ``tf`` is the timeframe; daily sources are unchanged.
+
 Reads never write. All writes go through temp file + ``os.replace``.
 
 Crash safety: the published state of a generation is exactly its ``gen.json``.
@@ -58,6 +63,12 @@ DEFAULT_BARS_FILE = "bars.parquet"
 LOCK_TIMEOUT_S = 30.0
 AUDIT_COLUMNS: tuple[str, ...] = ("fetched_at", "source_rev")
 _TS_FMT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def source_timeframe(source: str) -> str:
+    """Timeframe of a cache source key: ``alpaca/15m`` -> ``15m``; plain sources are daily."""
+    head, sep, tail = source.rpartition("/")
+    return tail if sep and head else "1d"
 
 
 def _fs_symbol(symbol: str) -> str:
@@ -252,8 +263,10 @@ class BarCache:
     ) -> None:
         gdir = self._gen_dir(source, symbol, gen)
         info = {k: v for k, v in info_base.items() if k != "file"}
-        info["first"] = data.index[0].strftime("%Y-%m-%d")
-        info["last"] = data.index[-1].strftime("%Y-%m-%d")
+        tf = source_timeframe(source)
+        label_fmt = "%Y-%m-%d" if tf == "1d" else _TS_FMT
+        info["first"] = data.index[0].strftime(label_fmt)
+        info["last"] = data.index[-1].strftime(label_fmt)
         if content_addressed:
             gdir.mkdir(parents=True, exist_ok=True)
             fd, tmp_name = tempfile.mkstemp(dir=gdir, prefix=".bars.", suffix=".tmp")
@@ -285,7 +298,7 @@ class BarCache:
         if switch_current:
             _atomic_json(
                 self._sym_dir(source, symbol) / "meta.json",
-                {"current_gen": gen, "schema": SCHEMA_VERSION, "tf": "1d"},
+                {"current_gen": gen, "schema": SCHEMA_VERSION, "tf": tf},
             )
 
     def create(

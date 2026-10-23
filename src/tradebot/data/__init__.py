@@ -18,7 +18,7 @@ from tradebot.data.errors import (
     UnknownSymbolError,
 )
 from tradebot.data.provider import DataProvider
-from tradebot.data.providers import CcxtProvider, FixtureProvider, YFinanceProvider
+from tradebot.data.providers import AlpacaProvider, CcxtProvider, FixtureProvider, YFinanceProvider
 from tradebot.data.quality import QualityReport
 from tradebot.data.service import MarketData, rebase, refresh, verify
 from tradebot.data.types import BAR_COLUMNS, AssetClass, Symbol, Timeframe
@@ -27,6 +27,7 @@ from tradebot.data.universe import DEFAULT_UNIVERSE, StaticUniverse, Universe
 __all__ = [
     "BAR_COLUMNS",
     "DEFAULT_UNIVERSE",
+    "AlpacaProvider",
     "AssetClass",
     "BarCache",
     "CacheCorruptError",

@@ -40,11 +40,13 @@ from tradebot.strategy.schema import (
     PriceOperand,
     RotationSpec,
     RulesSpec,
+    SessionOperand,
     StopRequest,
     StrategySpec,
 )
 from tradebot.strategy.signals import HeldPosition, Intent, SignalSet
 
+_NY = "America/New_York"
 _Tri = bool | None  # None = unknown (NaN involved)
 _OHLCV = ("open", "high", "low", "close", "volume")
 _CMP = {Gt: "gt", Ge: "ge", Lt: "lt", Le: "le", Eq: "eq"}
@@ -84,6 +86,8 @@ def _op_key(op: Any, ctx: str) -> tuple | None:
             sym, "ind", op.ind, op.of, op.period, op.skip, op.fast, op.slow, op.signal, op.k,
             op.field,
         )  # fmt: skip
+    if isinstance(op, SessionOperand):
+        return (_canon(op.symbol) if op.symbol else ctx, "session", op.session, op.bars)
     return None
 
 
@@ -94,12 +98,16 @@ def _compile_operand(op: Any) -> _Reader:
             return float(bh) if bh is not None else math.nan
 
         return read_pos
-    if isinstance(op, (PriceOperand, IndOperand)):
+    if isinstance(op, (PriceOperand, IndOperand, SessionOperand)):
+        keys: dict[str, tuple] = {}  # context symbol -> feature key (built once, not per read)
 
         def read_feat(f: Features, ctx: str, i: int, bh: int | None) -> float:
             if i < 0:
                 return math.nan
-            return float(f.arrays[_op_key(op, ctx)][i])  # type: ignore[index]
+            key = keys.get(ctx)
+            if key is None:
+                key = keys[ctx] = _op_key(op, ctx)  # type: ignore[assignment]
+            return float(f.arrays[key][i])
 
         return read_feat
     value = float(op)
@@ -176,7 +184,7 @@ def _compile_condition(c: Condition) -> _Cond:
 
 def _collect_operands(obj: Any) -> list[Any]:
     """All price/indicator operands inside a condition or operand (depth-first)."""
-    if isinstance(obj, (PriceOperand, IndOperand)):
+    if isinstance(obj, (PriceOperand, IndOperand, SessionOperand)):
         return [obj]
     out: list[Any] = []
     if isinstance(obj, AllOf):
@@ -234,18 +242,30 @@ class CompiledStrategy:
             assert isinstance(s, RulesSpec)
             self._entry = _compile_condition(s.entry)
             self._exit = _compile_condition(s.exit) if s.exit is not None else None
+            self._max_pos: int | None = (
+                int(s.position.max_positions) if s.position.max_positions is not None else None  # type: ignore[arg-type]
+            )
+            self._pos_rank = (
+                _compile_operand(s.position.rank.by) if s.position.rank is not None else None
+            )
+            self._pos_sign = (
+                -1.0 if s.position.rank is not None and s.position.rank.order == "desc" else 1.0
+            )
             for sym in self.universe:
                 for c in (s.entry, s.exit):
                     if c is not None:
                         for o in _collect_operands(c):
                             self._operands.append((o, sym))
+                if s.position.rank is not None:
+                    for o in _collect_operands(s.position.rank.by):
+                        self._operands.append((o, sym))
 
     # ------------------------------------------------------------------ schedule
     def _flags(self, cal: pd.DatetimeIndex) -> np.ndarray:
         n = len(cal)
         freq = self.spec.schedule.freq
         flags = np.ones(n, dtype=bool)
-        if freq == "daily" or n == 0:
+        if freq in ("daily", "bar") or n == 0:
             return flags
         if freq == "monthly":
             key = cal.year.to_numpy() * 100 + cal.month.to_numpy()
@@ -304,12 +324,37 @@ class CompiledStrategy:
             df = frames[sym]
             if key[1] == "price":
                 series = df[op.price]
+            elif key[1] == "session":
+                series = self._session(df, op)
             else:
                 series = self._indicator(raw, sym, df, op)
             arrays[key] = series.reindex(cal).to_numpy(dtype="float64")
         flags = self._flags(cal)
         self._flags_cache = flags
         return Features(calendar=cal, arrays=arrays, decision_flags=flags)
+
+    @staticmethod
+    def _session(df: pd.DataFrame, op: SessionOperand) -> pd.Series:
+        """Per-session value (causal) of a ``{session: ...}`` operand on one symbol's 15m bars."""
+        idx = df.index
+        n = len(idx)
+        codes = pd.factorize(idx.tz_convert(_NY).normalize())[0]  # one code per New York day
+        first = np.ones(n, dtype=bool)
+        first[1:] = codes[1:] != codes[:-1]
+        start = np.maximum.accumulate(np.where(first, np.arange(n), 0))
+        bar_index = np.arange(n) - start
+        if op.session == "bar_index":
+            vals = bar_index.astype("float64")
+        elif op.session == "open":
+            vals = df["open"].to_numpy(dtype="float64")[start]
+        else:
+            nb = int(op.bars)  # type: ignore[arg-type]
+            high = op.session == "range_high"
+            src = df["high" if high else "low"].to_numpy(dtype="float64")
+            part = pd.Series(np.where(bar_index < nb, src, np.nan))
+            agg = part.groupby(codes).transform("max" if high else "min").to_numpy()
+            vals = np.where(bar_index >= nb - 1, agg, np.nan)
+        return pd.Series(vals, index=idx, dtype="float64")
 
     @staticmethod
     def _indicator(raw: dict, sym: str, df: pd.DataFrame, op: IndOperand) -> pd.Series:
@@ -319,6 +364,8 @@ class CompiledStrategy:
             fn = INDICATORS[name]
             x = df[op.of]
             if name == "atr":
+                raw[rkey] = fn(df["high"], df["low"], df["close"], int(op.period))  # type: ignore[arg-type]
+            elif name == "devatr":
                 raw[rkey] = fn(df["high"], df["low"], df["close"], int(op.period))  # type: ignore[arg-type]
             elif name == "ret":
                 raw[rkey] = fn(x, int(op.period), int(op.skip or 0))  # type: ignore[arg-type]
@@ -413,8 +460,13 @@ class CompiledStrategy:
         s = self.spec
         assert isinstance(s, RulesSpec)
         w = s.position.weight
-        weight = 1.0 / len(self.universe) if w == "equal" else float(w)  # type: ignore[arg-type]
+        if w == "equal":
+            weight = 1.0 / (self._max_pos if self._max_pos is not None else len(self.universe))
+        else:
+            weight = float(w)  # type: ignore[arg-type]
         intents: list[Intent] = []
+        candidates: list[tuple[float, str]] = []  # (ascending sort key, symbol); capped rules
+        kept = 0
         for sym in self.universe:
             if sym in held:
                 bh = self._bars_held(f.calendar, held[sym], i)
@@ -427,8 +479,18 @@ class CompiledStrategy:
                 if out:
                     intents.append(self._intent(sym, "flat", 0.0, f"{why} (bars_held={bh})"))
                 else:
+                    kept += 1
                     intents.append(self._intent(sym, "long", weight, f"hold (bars_held={bh})"))
             elif _true(self._entry(f, sym, i, None)):
+                if self._max_pos is None:
+                    intents.append(self._intent(sym, "long", weight, "entry"))
+                else:
+                    score = self._pos_rank(f, sym, i, None)  # type: ignore[misc]
+                    if not math.isnan(score):
+                        candidates.append((self._pos_sign * score, sym))
+        if self._max_pos is not None and candidates:
+            candidates.sort()
+            for _, sym in candidates[: max(self._max_pos - kept, 0)]:
                 intents.append(self._intent(sym, "long", weight, "entry"))
         for sym in sorted(held):
             if sym not in self.universe:

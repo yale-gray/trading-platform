@@ -25,6 +25,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
+from tradebot.portfolio.asof import AsOf
 from tradebot.portfolio.config import EngineConfig
 from tradebot.portfolio.ledger import Ledger
 from tradebot.portfolio.models import Dec, EventType, LedgerEvent, PortfolioSnapshot, Stage
@@ -51,7 +52,7 @@ class RebalancePlan(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    asof: date
+    asof: AsOf
     equity: Dec
     target_values: dict[str, Dec]
     surplus: dict[str, Dec]
@@ -158,7 +159,7 @@ def is_rebalance_day(asof: date, last_rebalance_month: str | None) -> bool:
 def plan_rebalance(
     snapshot: PortfolioSnapshot,
     config: EngineConfig,
-    asof: date,
+    asof: AsOf,
     kill_switch: KillSwitch | None = None,
 ) -> RebalancePlan | None:
     """Decide the monthly rebalance at step F; ``None`` while the kill switch is tripped.
@@ -210,7 +211,7 @@ def book_planned(ledger: Ledger, plan: RebalancePlan) -> LedgerEvent:
 def execute_transfers(
     plan: RebalancePlan,
     portfolio: Portfolio | Ledger,
-    asof: date,
+    asof: AsOf,
     next_transfer_n: int,
     kill_switch: KillSwitch | None = None,
 ) -> TransferResult:
@@ -234,7 +235,8 @@ def execute_transfers(
             plan=None, transfers=[], events=[], next_transfer_n=n, dropped_killed=True
         )
 
-    cash = ledger.state.cash
+    view = ledger.state_view
+    cash = {sid: view.spendable(sid, asof) for sid in view.cash}  # T+1: settled cash only
     for sid in plan.surplus:
         if sid not in cash:
             raise KeyError(f"sleeve {sid} unknown to the ledger")

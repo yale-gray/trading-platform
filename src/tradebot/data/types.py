@@ -14,7 +14,8 @@ class AssetClass(StrEnum):
 
 
 class Timeframe(StrEnum):
-    D1 = "1d"  # v1 only; H1 etc. added later
+    D1 = "1d"
+    M15 = "15m"  # US equity regular-session bars, labelled at bar open (ADR-0001 A21)
 
 
 BAR_COLUMNS: tuple[str, ...] = ("open", "high", "low", "close", "volume")

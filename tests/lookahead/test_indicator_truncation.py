@@ -16,7 +16,18 @@ from helpers import (
     select_ts,
 )
 
-from tradebot.strategy.indicators import INDICATORS, atr, bbands, ema, macd, ret, rsi, sma, vol
+from tradebot.strategy.indicators import (
+    INDICATORS,
+    atr,
+    bbands,
+    devatr,
+    ema,
+    macd,
+    ret,
+    rsi,
+    sma,
+    vol,
+)
 
 # name -> (adapter bars -> output, warmup = first valid bar). Exact comparison (rtol=0) for all.
 INDICATOR_CASES: dict[str, tuple[BarsFn, int]] = {
@@ -27,6 +38,7 @@ INDICATOR_CASES: dict[str, tuple[BarsFn, int]] = {
     "macd": (lambda b: macd(b["close"]), 33),
     "bbands": (lambda b: bbands(b["close"]), 19),
     "atr": (lambda b: atr(b["high"], b["low"], b["close"], 14), 14),
+    "devatr": (lambda b: devatr(b["high"], b["low"], b["close"], 20), 20),
     "vol": (lambda b: vol(b["close"], 20), 20),
 }
 _NAMES = sorted(INDICATOR_CASES)

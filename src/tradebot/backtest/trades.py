@@ -8,13 +8,13 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from datetime import date
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Literal
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict
 
+from tradebot.portfolio.asof import AsOf, asof_timestamp
 from tradebot.portfolio.models import EventType, FillSide, LedgerEvent, PortfolioSnapshot
 from tradebot.portfolio.money import PRICE_Q, money_context
 from tradebot.sim.orders import Order, OrderOrigin
@@ -29,13 +29,14 @@ __all__ = [
     "open_positions",
 ]
 
-ExitReason = Literal["signal", "stop", "rebalance", "manual"]
+ExitReason = Literal["signal", "stop", "rebalance", "manual", "flatten"]
 
 _EXIT_REASONS: dict[OrderOrigin, ExitReason] = {
     OrderOrigin.STRATEGY: "signal",
     OrderOrigin.STOP: "stop",
     OrderOrigin.REBALANCE: "rebalance",
     OrderOrigin.MANUAL: "manual",
+    OrderOrigin.FLATTEN: "flatten",
 }
 
 
@@ -46,8 +47,8 @@ class ClosedTrade(BaseModel):
 
     sleeve_id: str
     symbol: str
-    entry_asof: date
-    exit_asof: date
+    entry_asof: AsOf
+    exit_asof: AsOf
     qty: Decimal  # total bought during the trip
     entry_price: Decimal  # quantity-weighted average buy fill price
     exit_price: Decimal  # quantity-weighted average sell fill price
@@ -64,7 +65,7 @@ class OpenPosition(BaseModel):
     sleeve_id: str
     symbol: str
     qty: Decimal
-    entry_asof: date
+    entry_asof: AsOf
     mv: Decimal
 
 
@@ -87,7 +88,7 @@ class _Trip:
         "sold",
     )
 
-    def __init__(self, entry_asof: date) -> None:
+    def __init__(self, entry_asof: AsOf) -> None:
         self.entry_asof = entry_asof
         self.qty = Decimal(0)  # running position
         self.bought = Decimal(0)
@@ -116,7 +117,7 @@ def closed_trades(ledger: Sequence[LedgerEvent], orders: Mapping[str, Order]) ->
             with money_context():
                 fees_by_order[ev.order_id] += ev.amount
     open_trips: dict[tuple[str, str], _Trip] = {}
-    out: list[tuple[date, str, str, int, ClosedTrade]] = []
+    out: list[tuple[AsOf, str, str, int, ClosedTrade]] = []
     with money_context():
         for ev in events:
             if ev.type is not EventType.FILL:
@@ -183,11 +184,11 @@ def open_positions(snapshot: PortfolioSnapshot) -> list[OpenPosition]:
 
 
 def _index(snapshots: Sequence[PortfolioSnapshot]) -> pd.DatetimeIndex:
-    return pd.DatetimeIndex([pd.Timestamp(s.asof, tz="UTC") for s in snapshots])
+    return pd.DatetimeIndex([asof_timestamp(s.asof) for s in snapshots])
 
 
 def equity_series(snapshots: Sequence[PortfolioSnapshot]) -> pd.Series:
-    """One float equity point per snapshot, indexed by UTC midnight of ``asof``."""
+    """One float equity point per snapshot, indexed by ``asof`` (UTC midnight, or the bar open)."""
     return pd.Series(
         [float(s.equity) for s in snapshots],
         index=_index(snapshots),

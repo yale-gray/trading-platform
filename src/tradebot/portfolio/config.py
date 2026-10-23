@@ -5,9 +5,17 @@ from __future__ import annotations
 from collections.abc import Mapping
 from decimal import ROUND_FLOOR, Decimal
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, field_serializer, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    SerializerFunctionWrapHandler,
+    field_serializer,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from tradebot.data.types import AssetClass
 from tradebot.portfolio.money import CENT_Q, EQUITY_QTY_QUANTUM, money_context
@@ -97,6 +105,22 @@ class EngineConfig(BaseModel):
     # Equity quantity grid: 1 = whole shares; default 1e-6 = fractional shares
     # (owner decision 2026-10-22). Crypto stays at 1e-8.
     equity_qty_quantum: Decimal = EQUITY_QTY_QUANTUM
+    # Day-trading account (ADR-0001 A21). Both default to the daily behaviour and are left out
+    # of the serialised config while at their defaults, so daily configs/states stay byte-stable.
+    # ``intraday_flatten``: on the last bar of each session every open position is sold at that
+    # bar's close and no BUY is submitted on it, so nothing is held overnight.
+    # ``settlement``: "t1" = cash account, SELL proceeds fund BUYs only from the next trading day.
+    intraday_flatten: bool = False
+    settlement: Literal["none", "t1"] = "none"
+
+    @model_serializer(mode="wrap")
+    def _omit_default_flags(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data: dict[str, Any] = handler(self)
+        if not self.intraday_flatten:
+            data.pop("intraday_flatten", None)
+        if self.settlement == "none":
+            data.pop("settlement", None)
+        return data
 
     @field_validator("equity_qty_quantum", mode="before")
     @classmethod

@@ -10,13 +10,14 @@ a wall clock; the only float-to-Decimal conversion is :func:`to_price`.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict
 
 from tradebot.data.types import AssetClass
+from tradebot.portfolio.asof import AsOf
 from tradebot.portfolio.config import EngineConfig
 from tradebot.portfolio.ledger import LedgerError
 from tradebot.portfolio.models import Dec, FillSide, LedgerEvent, PortfolioSnapshot, Stage
@@ -26,6 +27,7 @@ from tradebot.sim import costs
 from tradebot.sim.orders import (
     Order,
     OrderIdGenerator,
+    OrderOrigin,
     OrderReason,
     OrderRequest,
     OrderStatus,
@@ -59,7 +61,7 @@ class FillResult(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    asof: date
+    asof: AsOf
     fills: list[Order]
     rejected: list[Order]
     expired: list[Order]
@@ -83,18 +85,18 @@ class BrokerBook(BaseModel):
     orders: list[Order]
     pending_ids: list[str]
     waited: dict[str, int]
-    last_asof: date | None = None
+    last_asof: AsOf | None = None
     last_close: dict[str, Dec]
 
 
 class Broker(Protocol):
     """The broker interface; ``SimBroker`` is the only implementation."""
 
-    def submit_orders(self, requests: Sequence[OrderRequest], asof: date) -> list[Order]: ...
+    def submit_orders(self, requests: Sequence[OrderRequest], asof: AsOf) -> list[Order]: ...
 
     def cancel_order(self, order_id: str) -> Order: ...
 
-    def process_bar(self, asof: date, bars: Mapping[str, Bar]) -> FillResult: ...
+    def process_bar(self, asof: AsOf, bars: Mapping[str, Bar]) -> FillResult: ...
 
     def snapshot(self) -> PortfolioSnapshot: ...
 
@@ -127,7 +129,7 @@ class SimBroker:
         self._pending: dict[str, Order] = {}
         self._waited: dict[str, int] = {}
         self._orders: dict[str, Order] = {}
-        self._last_asof: date | None = None
+        self._last_asof: AsOf | None = None
         self._last_close: dict[str, Decimal] = {}
 
     @property
@@ -184,13 +186,13 @@ class SimBroker:
         """Latest known state of an order (any status)."""
         return self._orders[order_id]
 
-    def submit_orders(self, requests: Sequence[OrderRequest], asof: date) -> list[Order]:
+    def submit_orders(self, requests: Sequence[OrderRequest], asof: AsOf) -> list[Order]:
         """Create PENDING orders (created at ``asof``, fill at a later bar's open).
 
         Raises ``ValueError`` (before creating anything) for an unknown sleeve or
         a SELL above the sleeve's holding minus qty reserved by pending SELLs.
         """
-        state = self.portfolio.ledger.state
+        state = self.portfolio.ledger.state_view
         reserved: dict[tuple[str, str], Decimal] = {}
         for o in self._pending.values():
             if o.side is Side.SELL:
@@ -236,7 +238,7 @@ class SimBroker:
         self._waited.pop(order.order_id, None)
         self._orders[order.order_id] = order
 
-    def process_bar(self, asof: date, bars: Mapping[str, Bar]) -> FillResult:
+    def process_bar(self, asof: AsOf, bars: Mapping[str, Bar]) -> FillResult:
         """Step A: fill pending orders at ``asof`` opens; SELLs first, then BUYs."""
         if self._last_asof is not None and asof <= self._last_asof:
             raise StaleBarError(f"asof {asof} is not after last processed {self._last_asof}")
@@ -276,17 +278,53 @@ class SimBroker:
             asof=asof, fills=fills, rejected=rejected, expired=expired, new_ledger_events=events
         )
 
+    def observe_close(self, symbol: str, close: Decimal) -> None:
+        """Record a close the engine marked outside ``process_bar`` (lean marking, no fills)."""
+        self._last_close[symbol] = close
+
+    def flatten_at_close(
+        self, asof: AsOf, closes: Mapping[str, Decimal], submitted: AsOf | None = None
+    ) -> FillResult:
+        """End-of-session exit (ADR-0001 A21): cancel every pending order, sell every position.
+
+        Each position is sold in full at its symbol's bar *close* (+/- sell slippage), like a
+        market-on-close order that was queued before the bar; ``submitted`` (default one
+        second before ``asof``) is its creation stamp so ``fill_asof > created_asof`` (I8) holds.
+        ``closes`` must cover every held symbol. Orders carry ``OrderOrigin.FLATTEN``.
+        """
+        stamp = submitted if submitted is not None else asof - timedelta(seconds=1)  # type: ignore[operator]
+        cancelled = [self.cancel_order(o.order_id) for o in self.pending_orders]
+        state = self.portfolio.ledger.state_view
+        reqs = [
+            OrderRequest(
+                sleeve_id=sid, symbol=sym, side=Side.SELL, qty=pos.qty, origin=OrderOrigin.FLATTEN
+            )
+            for sid in sorted(state.positions)
+            for sym, pos in sorted(state.positions[sid].items())
+        ]
+        fills: list[Order] = []
+        rejected: list[Order] = []
+        events: list[LedgerEvent] = []
+        for order in self.submit_orders(reqs, stamp):
+            done, evs = self._fill(order, asof, closes[order.symbol], Stage.CLOSE)
+            self._finish(done)
+            events.extend(evs)
+            (fills if done.status is OrderStatus.FILLED else rejected).append(done)
+        return FillResult(
+            asof=asof, fills=fills, rejected=rejected, expired=cancelled, new_ledger_events=events
+        )
+
     def _fill(
-        self, order: Order, asof: date, open_price: Decimal
+        self, order: Order, asof: AsOf, open_price: Decimal, stage: Stage = Stage.OPEN_FILL
     ) -> tuple[Order, list[LedgerEvent]]:
         ac = self._asset_class_of(order.symbol)
         cost = self._config.costs[ac]
         qty = order.qty_requested
         reason: OrderReason | None = None
-        state = self.portfolio.ledger.state
+        state = self.portfolio.ledger.state_view
         if order.side is Side.BUY:
             price = costs.buy_fill_price(open_price, cost.slip_bps)
-            cash = state.cash[order.sleeve_id]
+            cash = state.spendable(order.sleeve_id, asof)  # settled cash only (T+1 accounts)
             if not self._buy_affordable(qty, price, cost.fee_bps, cash):
                 qty = self._shrink_buy(
                     qty, price, cost.fee_bps, cash, ac, self._config.equity_qty_quantum
@@ -309,7 +347,7 @@ class SimBroker:
         try:
             evs = self.portfolio.ledger.append_fill(
                 asof=asof,
-                stage=Stage.OPEN_FILL,
+                stage=stage,
                 sleeve_id=order.sleeve_id,
                 symbol=order.symbol,
                 side=FillSide(order.side.value),

@@ -44,3 +44,10 @@ def test_vol_scaled_override_and_max_weight_without_fallback() -> None:
     assert cfg.engine.sleeves[0].vol_scaled is False
     no_fb = spec.model_copy(update={"fallback": None})
     assert strategy_max_weight(no_fb) == Decimal(1) / Decimal(3)
+
+
+def test_equal_weight_with_max_positions_caps_at_one_over_max_positions() -> None:
+    spec = load_strategy(STRATEGIES / "tA_st_reversal.yaml")
+    mp = spec.resolve().position.max_positions
+    assert mp is not None
+    assert strategy_max_weight(spec) == Decimal(1) / Decimal(int(mp))

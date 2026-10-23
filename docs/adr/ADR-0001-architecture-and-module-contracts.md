@@ -372,6 +372,8 @@ The owner asked for prerequisites P1-P5 from `docs/research/dt-deep/00-summary.m
 - **M6, survivorship.** Results for the stock-universe candidates (A1, A4) are labelled as upward-biased upper bounds.
 - **M7, sensitivity.** Clock-rule bar indices stay literals, so gate 5 is uninformative for A2, A5 and A6, and the write-up says so.
 
+**A31. T-bill edge correction (PM, 2026-10-23, found after the first Tier A run).** The A26 edge test subtracted the full daily T-bill rate every day, but the simulator's idle cash earns 0, so part-time strategies were charged interest they could never earn. The edge is now measured as if idle cash earned T-bills: `excess_t = r_t - rf_t * w_t`, where `w_t` is the fraction of equity invested at the start of day t (previous day's closing exposure). A strategy fully in cash has edge 0; a fully invested one is unchanged. The correction applies equally to every candidate; gate thresholds are unchanged.
+
 ## Consequences
 - **One loop (`BarDriver`) and one engine** mean a backtest result and a paper result for the same bars must match exactly. SPEC-005 can test that directly.
 - **Synthetic fixtures** keep the public repo clean and the goldens stable, but CI never sees real market data. Real-data sanity checks are a manual, local step before any strategy passes the gate.

@@ -124,3 +124,18 @@ def test_holdout_log_rules(tmp_path) -> None:  # type: ignore[no-untyped-def]
         log.record({"id": "c", "batch": "b1"})
     log.record({"id": "c", "batch": "b2"})
     assert [e["id"] for e in HoldoutLog(tmp_path / "h.json").entries] == ["a", "b", "c"]
+
+
+def test_edge_vs_tbills_exposure_correction_a31() -> None:
+    idx = pd.bdate_range("2020-01-01", periods=300, tz="UTC")
+    bill = pd.Series(0.0252, index=idx)  # 0.0001 per day
+    cash = pd.Series(0.0, index=idx)
+    zero = pd.Series(0.0, index=idx)
+    res = edge_vs_tbills(cash, tbill=bill, exposure=zero)
+    assert res.mean_daily == pytest.approx(0.0, abs=1e-15)
+    rng = np.random.default_rng(5)
+    r = pd.Series(rng.normal(0.001, 0.005, 300), index=idx)
+    full = edge_vs_tbills(r, tbill=bill, exposure=pd.Series(1.0, index=idx))
+    old = edge_vs_tbills(r, tbill=bill)
+    assert full.mean_daily == pytest.approx(old.mean_daily)
+    assert full.mean_daily == pytest.approx(r.mean() - 0.0001)

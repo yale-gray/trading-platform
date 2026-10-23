@@ -56,6 +56,16 @@ def daily_returns(equity: pd.Series) -> pd.Series:
     return s.pct_change().dropna()
 
 
+def daily_start_exposure(exposure: pd.Series, index: pd.Index) -> pd.Series:
+    """Fraction of equity invested at the START of each day in ``index`` (A31).
+
+    The last exposure of the previous UTC day, on the ``daily_returns`` grid; 0 when unknown.
+    """
+    x = exposure.astype("float64")
+    x = x.groupby(x.index.normalize()).last().shift(1)
+    return x.reindex(index).fillna(0.0)
+
+
 def days_per_year(periods_per_year: int) -> int:
     """365 for crypto accounts (ppy 365), else 252 (daily and intraday equity accounts)."""
     return 365 if periods_per_year == 365 else 252
@@ -115,6 +125,7 @@ def edge_vs_tbills(
     returns: pd.Series,
     *,
     tbill: pd.Series | None = None,
+    exposure: pd.Series | None = None,
     periods_per_year: int = 252,
     lags: int = NW_LAGS,
 ) -> EdgeResult:
@@ -122,11 +133,18 @@ def edge_vs_tbills(
 
     ``tbill`` is the annual decimal rate (default: committed FRED DTB3), forward-filled onto the
     return dates; the daily rate is annual / days-per-year.
+
+    A31: the simulator's idle cash earns 0, so the edge is measured as if idle cash earned the
+    bill: excess_t = r_t - rf_t * w_t, with ``w_t`` the fraction of equity invested at the start
+    of day t (``exposure``, on the same grid as ``returns``; see ``daily_start_exposure``).
+    Equivalent to r_t + rf_t(1 - w_t) - rf_t. A strategy fully in cash has edge exactly 0; a fully
+    invested one gets the old formula. ``exposure=None`` means fully invested (w = 1).
     """
     dpy = days_per_year(periods_per_year)
     rates = tbill if tbill is not None else load_dtb3()
     aligned = rates.reindex(rates.index.union(returns.index)).ffill().reindex(returns.index)
-    ex = (returns - aligned / dpy).dropna()
+    w = 1.0 if exposure is None else exposure.reindex(returns.index).fillna(0.0)
+    ex = (returns - (aligned / dpy) * w).dropna()
     n = len(ex)
     if n < 3:
         return EdgeResult(n=n, mean_daily=NAN, mean_annual=NAN, t_stat=NAN, p_value=1.0)

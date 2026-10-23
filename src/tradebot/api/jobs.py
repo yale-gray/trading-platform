@@ -151,7 +151,7 @@ def strategy_max_weight(spec: Any) -> Decimal:
     """Largest fraction of the fund one symbol of ``spec`` can hold by its own design (ADR A16).
 
     Rotation: ``1/top_n`` (``1`` when a fallback symbol can fill every empty slot). Rules: its
-    fixed weight, or ``1/len(universe)`` for ``equal``.
+    fixed weight, or for ``equal`` ``1/max_positions`` when set, else ``1/len(universe)``.
     """
     resolved = spec.resolve()
     if resolved.kind == "rotation":
@@ -161,6 +161,9 @@ def strategy_max_weight(spec: Any) -> Decimal:
     w = resolved.position.weight
     if isinstance(w, (int, float)) and not isinstance(w, bool):
         return min(Decimal(1), Decimal(repr(float(w))))
+    mp = getattr(resolved.position, "max_positions", None)
+    if mp is not None:
+        return Decimal(1) / Decimal(max(1, int(mp)))
     return Decimal(1) / Decimal(max(1, len(resolved.universe)))
 
 

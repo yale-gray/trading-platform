@@ -44,6 +44,7 @@ from tradebot.backtest.protocol import (
     HoldoutLog,
     OverlayResult,
     daily_returns,
+    daily_start_exposure,
     deflated_sharpe,
     edge_vs_tbills,
     holm_adjust,
@@ -1252,7 +1253,8 @@ def run_validation(
     if protocol:
         rets = daily_returns(full.result.equity)
         ppy = full.result.periods_per_year
-        edge = edge_vs_tbills(rets, periods_per_year=ppy)
+        expo = daily_start_exposure(full.result.exposure, rets.index)
+        edge = edge_vs_tbills(rets, exposure=expo, periods_per_year=ppy)
         spy = spy_bars if spy_bars is not None else canon.get("SPY")
         assert spy is not None
         overlay = spy_overlay(rets, daily_returns(spy["close"]), periods_per_year=ppy)

@@ -298,9 +298,7 @@ def check_qty_grid(
         raise LedgerError(f"{where}: {symbol} quantity {qty} has more than 8 decimals (I4)")
 
 
-def replay(
-    events: Iterable[LedgerEvent], equity_qty_quantum: Decimal | None = None
-) -> LedgerState:
+def replay(events: Iterable[LedgerEvent], equity_qty_quantum: Decimal | None = None) -> LedgerState:
     """Fold events (in order) into per-sleeve cash and positions."""
     state = LedgerState(equity_qty_quantum)
     for ev in events:

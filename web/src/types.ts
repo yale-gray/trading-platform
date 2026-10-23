@@ -14,6 +14,21 @@ export type KillSwitch = {
 };
 export type PortfolioDetail = Portfolio & {
   sleeves: Sleeve[]; kill_switch: KillSwitch; benchmarks: Portfolio[]; caveats?: string[];
+  cash: string; unsettled_cash: string; settled_cash: string; as_of?: string | null;
+};
+export type ExitReason = "signal" | "stop" | "rebalance" | "manual" | "flatten" | "flatten_no_bar";
+/** One completed buy-then-sell (GET /portfolios/{id}/roundtrips). Timestamps are naive UTC. */
+export type RoundTrip = {
+  sleeve_key: string; symbol: string; entry_ts: string; exit_ts: string; qty: string;
+  entry_price: string; exit_price: string; fees: string; pnl: string; pnl_pct: number; exit_reason: ExitReason;
+};
+export type RoundTripPage = {
+  items: RoundTrip[]; total: number; limit: number; win_rate: number | null; total_pnl: string;
+};
+/** One session of the account versus its benchmark (GET /portfolios/{id}/daily, oldest first). */
+export type DailyResult = {
+  date: string; start_equity: string; end_equity: string; pnl: string; pnl_pct: number;
+  n_roundtrips: number; benchmark_pnl_pct: number | null;
 };
 export type EquityPoint = {
   ts: string; equity: string; drawdown_pct: number;

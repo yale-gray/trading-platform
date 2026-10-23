@@ -82,6 +82,9 @@ h3 { font-size: 17px; margin: 0 0 var(--s1); }
 th { text-align: left; color: var(--label2); font-weight: 600; font-size: 13px; padding: 4px 8px 8px 0; } td { padding: 10px 8px 10px 0; border-top: 1px solid var(--sep); }
 .r { text-align: right; } th.r, td.r { padding-right: 0; }
 .trades, .plain { margin: 0; padding-left: 20px; } .trades li + li, .plain li + li { margin-top: 8px; }
+.cash-strip .cash-line { margin: 0; }
+.daily li .small { margin-top: 2px; }
+.daily li + li { margin-top: 12px; }
 .glossary div + div { margin-top: var(--s2); } dt { font-weight: 600; } dd { margin: 2px 0 0; color: var(--label2); }
 .info { position: relative; display: inline-block; text-transform: none; letter-spacing: 0; }
 .info-btn { background: none; border: 0; color: var(--label2); cursor: help; padding: 0 2px; font-size: 14px; line-height: 1; min-width: 20px; min-height: 20px; }

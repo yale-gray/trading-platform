@@ -1,5 +1,5 @@
-import { clockTime, longDate, money, qty, shortDate } from "./format";
-import type { Portfolio, Trade } from "./types";
+import { clockTime, longDate, money, pct, qty, shortDate, signedMoney } from "./format";
+import type { ExitReason, Portfolio, RoundTrip, Trade } from "./types";
 
 const CRYPTO = /-|\//;
 
@@ -74,3 +74,20 @@ export const DAY_STRATEGIES: Record<string, { title: string; does: string; strat
 };
 
 export const DAY_NOTE = "Buys and sells within the same day. Everything is sold before the 4 pm close.";
+
+/** Exit reasons in plain words. Keys match the API's ExitReason values. */
+export const EXIT_REASON_WORDS: Record<ExitReason, string> = {
+  signal: "exit rule met",
+  stop: "safety stop",
+  rebalance: "rebalanced",
+  manual: "sold by hand",
+  flatten: "sold at the close",
+  flatten_no_bar: "sold at the close (no last price, extra cost)",
+};
+
+/** "Bought NVDA at 10:45 am, sold at 11:30 am · +$3.12 (+0.4%) · exit rule met". */
+export function roundTripSentence(t: Pick<RoundTrip, "symbol" | "entry_ts" | "exit_ts" | "pnl" | "pnl_pct" | "exit_reason">): string {
+  const at = (ts: string) => clockTime(ts) ?? shortDate(ts);
+  const reason = EXIT_REASON_WORDS[t.exit_reason] ?? t.exit_reason;
+  return `Bought ${t.symbol} at ${at(t.entry_ts)}, sold at ${at(t.exit_ts)} · ${signedMoney(Number(t.pnl))} (${pct(t.pnl_pct)}) · ${reason}`;
+}

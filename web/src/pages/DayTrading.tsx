@@ -1,8 +1,9 @@
+import type { ReactNode } from "react";
 import { useApi } from "../api";
-import { Card, Delta, Empty, ErrorNote, Loading, PctDelta, Stat, money } from "../components/ui";
-import { DAY_NOTE, DAY_STRATEGIES, SURVIVORSHIP, dayTradeSentence, isDayTrading } from "../copy";
-import { dayKey, pct } from "../format";
-import type { EquityPoint, Page, Portfolio, PortfolioDetail, Position, Trade } from "../types";
+import { Card, Delta, Empty, ErrorNote, Info, Loading, PctDelta, Stat, money } from "../components/ui";
+import { DAY_NOTE, DAY_STRATEGIES, SURVIVORSHIP, isDayTrading, roundTripSentence } from "../copy";
+import { dayKey, pct, shortDate, signedMoney } from "../format";
+import type { DailyResult, EquityPoint, Portfolio, PortfolioDetail, Position, RoundTripPage } from "../types";
 
 /** Today's change in dollars: last value minus the last value before today (or the first value today). */
 export function dayChange(rows: EquityPoint[]): number | null {
@@ -23,7 +24,8 @@ export default function DayTrading() {
   const detail = useApi<PortfolioDetail>(pid !== null ? `/portfolios/${pid}` : null);
   const eq = useApi<EquityPoint[]>(pid !== null ? `/portfolios/${pid}/equity` : null);
   const pos = useApi<Position[]>(pid !== null ? `/portfolios/${pid}/positions` : null);
-  const tr = useApi<Page<Trade>>(pid !== null ? `/portfolios/${pid}/trades?limit=200` : null);
+  const rt = useApi<RoundTripPage>(pid !== null ? `/portfolios/${pid}/roundtrips?limit=200` : null);
+  const daily = useApi<DailyResult[]>(pid !== null ? `/portfolios/${pid}/daily` : null);
 
   if (ports.error) return (<><h1>Day Trading</h1><ErrorNote what="the bot" /></>);
   if (ports.loading) return (<><h1>Day Trading</h1><Loading /></>);
@@ -44,11 +46,17 @@ export default function DayTrading() {
 
   const rows = eq.data ?? [];
   const chg = dayChange(rows);
-  const items = tr.data?.items ?? [];
+  // Round trips are newest exit first; keep the ones that closed today in local time.
   const todayKey = dayKey(new Date());
-  const tradesToday = items.filter((t) => dayKey(t.ts) === todayKey);
+  const closedToday = (rt.data?.items ?? []).filter((t) => dayKey(t.exit_ts) === todayKey);
+  const wins = closedToday.filter((t) => Number(t.pnl) > 0).length;
+  const pnlToday = closedToday.reduce((sum, t) => sum + Number(t.pnl), 0);
+  const winRateToday = closedToday.length ? Math.round((wins / closedToday.length) * 100) : null;
+  const recentDays = [...(daily.data ?? [])].slice(-10).reverse();
   const openNow = pos.data?.length ?? 0;
   const caveat = detail.data?.caveats?.[0] ?? SURVIVORSHIP;
+  const settled = detail.data?.settled_cash;
+  const unsettled = detail.data?.unsettled_cash;
 
   return (
     <>
@@ -67,10 +75,33 @@ export default function DayTrading() {
         </div>
       </Card>
 
+      <Card className="cash-strip">
+        <p className="cash-line">
+          <span>{settled !== undefined && unsettled !== undefined
+            ? `Ready to trade ${money(settled)} · Settling ${money(unsettled)} (available tomorrow)`
+            : "Cash figures appear after the first bar."}</span>{" "}
+          <Info term="settlement" />
+        </p>
+      </Card>
+
       <h2>Today</h2>
       <Card>
         <div className="stats">
-          <Stat label="Trades today" value={tradesToday.length} note="Buys and sells so far today." />
+          <Stat
+            label="Round trips today"
+            value={closedToday.length}
+            note={closedToday.length ? "Buy-then-sell pairs closed today." : "None closed yet today."}
+          />
+          <Stat
+            label="Win rate today"
+            value={winRateToday === null ? "—" : `${winRateToday}%`}
+            note={winRateToday === null ? "Shows once a round trip closes." : `${wins} of ${closedToday.length} made money.`}
+          />
+          <Stat
+            label="P&L today"
+            value={closedToday.length ? <Delta value={pnlToday} /> : "—"}
+            note="After fees, from closed round trips."
+          />
           <Stat label="Open positions right now" term="intraday" value={openNow} note="0 overnight" />
         </div>
       </Card>
@@ -91,13 +122,28 @@ export default function DayTrading() {
         })}
       </div>
 
-      <h2>Recent trades</h2>
+      <h2>Today's trades</h2>
       <Card>
-        {items.length === 0 ? (
-          <Empty title="No trades yet">When the bot buys or sells, each trade will be listed here in plain English.</Empty>
+        {rt.error ? (
+          <p className="muted">Couldn't load today's trades.</p>
+        ) : closedToday.length === 0 ? (
+          <Empty title="No round trips closed today">When the bot buys and then sells a stock, each pair will be listed here in plain English.</Empty>
         ) : (
           <ul className="trades">
-            {items.slice(0, 10).map((t, i) => <li key={i}>{dayTradeSentence(t)}</li>)}
+            {closedToday.map((t, i) => <li key={i}>{roundTripSentence(t)}</li>)}
+          </ul>
+        )}
+      </Card>
+
+      <h2>Daily results</h2>
+      <Card>
+        {daily.error ? (
+          <p className="muted">Couldn't load daily results.</p>
+        ) : recentDays.length === 0 ? (
+          <Empty title="No sessions yet">Each trading day's result will appear here once the account has a full session.</Empty>
+        ) : (
+          <ul className="trades daily">
+            {recentDays.map((d) => <DailyRow key={d.date} d={d} />)}
           </ul>
         )}
       </Card>
@@ -116,5 +162,29 @@ export default function DayTrading() {
 
       <p className="muted small">Simulated money only · Not financial advice</p>
     </>
+  );
+}
+
+/** One session: date, P&L in dollars and percent, and how it compared with the benchmark. */
+function DailyRow({ d }: { d: DailyResult }) {
+  const pnl = Number(d.pnl);
+  const trips = d.n_roundtrips === 1 ? "1 round trip" : `${d.n_roundtrips} round trips`;
+  let versus: ReactNode;
+  if (d.benchmark_pnl_pct === null) {
+    versus = <span className="muted">No benchmark price that day.</span>;
+  } else {
+    const gap = d.pnl_pct - d.benchmark_pnl_pct;
+    const text = Math.abs(gap) < 0.05
+      ? "matched the benchmark"
+      : `${gap > 0 ? "beat" : "trailed"} the benchmark by ${Math.abs(gap).toFixed(1)} points`;
+    versus = <Delta value={gap} text={text} label={`(benchmark ${pct(d.benchmark_pnl_pct)})`} />;
+  }
+  return (
+    <li>
+      <strong>{shortDate(`${d.date}T12:00:00`)}</strong>{" · "}
+      <Delta value={pnl} text={`${signedMoney(pnl)} (${pct(d.pnl_pct)})`} />{" · "}
+      <span className="muted">{trips}</span>
+      <div className="small">{versus}</div>
+    </li>
   );
 }

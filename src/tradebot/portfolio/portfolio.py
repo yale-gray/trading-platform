@@ -194,7 +194,7 @@ class Portfolio:
         state: LedgerState = given if given is not None else self.ledger.state_view
         do_replay = full_replay if full_replay is not None else given is None
         if do_replay:
-            again = replay(self.ledger.events)
+            again = replay(self.ledger.events, state.equity_qty_quantum)
             live = self.ledger.state_view
             if again.cash != live.cash or again.positions != live.positions:
                 raise LedgerError("I5: replay does not reproduce state")
@@ -245,7 +245,7 @@ def _check_state_rules(state: LedgerState) -> None:
         for sym, p in book.items():
             if p.qty <= 0:
                 raise LedgerError(f"I4: zero/negative qty retained for {sid}/{sym}")
-            check_qty_grid(sym, p.qty, f"I4 {sid}/{sym}")
+            check_qty_grid(sym, p.qty, f"I4 {sid}/{sym}", state.equity_qty_quantum)
     bad = state.unpaired_transfers()
     if bad:
         raise LedgerError(f"I7: unpaired transfer legs {bad}")

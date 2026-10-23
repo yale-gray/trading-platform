@@ -127,11 +127,21 @@ def test_target_value_is_weight_times_sizing_equity() -> None:
 
 def test_target_quantity_rounds_equities_down_to_whole_shares() -> None:
     # 25000 / 100 = 250 exactly.
-    assert target_quantity(D("25000"), D("100"), AssetClass.EQUITY) == D("250")
+    assert target_quantity(D("25000"), D("100"), AssetClass.EQUITY, D("1")) == D("250")
     # 250.99 / 100 = 2.5099 -> 2 shares.
-    assert target_quantity(D("250.99"), D("100"), AssetClass.EQUITY) == D("2")
+    assert target_quantity(D("250.99"), D("100"), AssetClass.EQUITY, D("1")) == D("2")
     # 5 / 100 = 0.05 -> 0 shares (sub-share).
-    assert target_quantity(D("5"), D("100"), AssetClass.EQUITY) == D("0")
+    assert target_quantity(D("5"), D("100"), AssetClass.EQUITY, D("1")) == D("0")
+
+
+def test_target_quantity_fractional_equity_rounds_down_at_1e6() -> None:
+    # SPY 764.00, $2,500 target: 2500 / 764 = 3.27225130890... -> 3.272251 (down at 1e-6).
+    assert target_quantity(D("2500"), D("764.00"), AssetClass.EQUITY) == D("3.272251")
+    # Quantum 0.1: 2500 / 764 -> 3.2 ; quantum 1 -> 3.
+    assert target_quantity(D("2500"), D("764"), AssetClass.EQUITY, D("0.1")) == D("3.2")
+    assert target_quantity(D("2500"), D("764"), AssetClass.EQUITY, D("1")) == D("3")
+    # Crypto is unaffected by the equity quantum.
+    assert target_quantity(D("10000"), D("3"), AssetClass.CRYPTO, D("1")) == D("3333.33333333")
 
 
 def test_target_quantity_rounds_crypto_down_to_eight_decimals() -> None:

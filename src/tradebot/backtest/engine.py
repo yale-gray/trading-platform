@@ -165,6 +165,7 @@ def _config_payload(cfg: BacktestConfig) -> dict[str, Any]:
         "end": cfg.end.isoformat(),
         "rf_annual": cfg.rf_annual,
         "initial_capital": str(eng.initial_capital),
+        "equity_qty_quantum": str(eng.equity_qty_quantum),
         "risk": eng.risk.model_dump(mode="json"),
         "costs": {k.value: v.model_dump(mode="json") for k, v in sorted(eng.costs.items())},
         "engine_sleeves": [

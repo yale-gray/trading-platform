@@ -301,7 +301,15 @@ def test_floor_qty8_rejects_negative() -> None:
 
 
 def test_buy_qty_equity_dispatches_to_whole_shares() -> None:
-    assert buy_qty(D("40.99"), AssetClass.EQUITY) == D("40")
+    # Whole-share mode: quantum 1 (the pre-2026-10-22 behaviour).
+    assert buy_qty(D("40.99"), AssetClass.EQUITY, D("1")) == D("40")
+
+
+def test_buy_qty_equity_default_is_fractional_at_1e6() -> None:
+    assert buy_qty(D("40.9999999"), AssetClass.EQUITY) == D("40.999999")
+    assert buy_qty(D("0.0000009"), AssetClass.EQUITY) == D("0")
+    # Crypto stays at 1e-8 whatever the equity quantum is.
+    assert buy_qty(D("0.123456789"), AssetClass.CRYPTO, D("1")) == D("0.12345678")
 
 
 def test_buy_qty_crypto_dispatches_to_eight_dp() -> None:
@@ -324,7 +332,13 @@ def test_check_sell_qty_equity_integral_unchanged() -> None:
 
 def test_check_sell_qty_equity_fractional_rejected() -> None:
     with pytest.raises(BadQuantityError):
-        check_sell_qty(D("3.5"), AssetClass.EQUITY)
+        check_sell_qty(D("3.5"), AssetClass.EQUITY, D("1"))
+
+
+def test_check_sell_qty_equity_default_grid_accepts_fraction_rejects_sub_quantum() -> None:
+    assert check_sell_qty(D("3.272251"), AssetClass.EQUITY) == D("3.272251")
+    with pytest.raises(BadQuantityError):
+        check_sell_qty(D("3.2722511"), AssetClass.EQUITY)
 
 
 def test_check_sell_qty_crypto_smallest_grid_step_unchanged() -> None:
@@ -516,9 +530,9 @@ _CALLS: list[tuple[str, Callable[[], Decimal], Decimal, int]] = [
     ("q2_big", lambda: q2(D("123456.785")), D("123456.78"), -2),
     ("floor_shares", lambda: floor_shares(D("12.9999")), D("12"), 0),
     ("floor_qty8", lambda: floor_qty8(D("0.123456789")), D("0.12345678"), -8),
-    ("buy_qty_equity", lambda: buy_qty(D("40.99"), AssetClass.EQUITY), D("40"), 0),
+    ("buy_qty_equity", lambda: buy_qty(D("40.99"), AssetClass.EQUITY, D("1")), D("40"), 0),
     ("buy_qty_crypto", lambda: buy_qty(D("0.123456789"), AssetClass.CRYPTO), D("0.12345678"), -8),
-    ("check_sell_qty", lambda: check_sell_qty(D("3"), AssetClass.EQUITY), D("3"), 0),
+    ("check_sell_qty", lambda: check_sell_qty(D("3"), AssetClass.EQUITY, D("1")), D("3"), 0),
     ("q_ratio", lambda: q_ratio(D("0.00000000015")), D("0.0000000002"), -10),
     ("q_weight", lambda: q_weight(D("0.1234565")), D("0.123456"), -6),
     ("from_text", lambda: from_text("0E-8"), D("0E-8"), -8),
@@ -636,9 +650,9 @@ def test_error_paths_ignore_ambient_context(ambient: Callable[[object], None]) -
         with pytest.raises(MoneyError):
             q2(D("1E+30"))
         with pytest.raises(BadQuantityError):
-            check_sell_qty(D("1E+30"), AssetClass.EQUITY)
+            check_sell_qty(D("1E+30"), AssetClass.EQUITY, D("1"))
         with pytest.raises(BadQuantityError):
-            check_sell_qty(D("3.5"), AssetClass.EQUITY)
+            check_sell_qty(D("3.5"), AssetClass.EQUITY, D("1"))
 
 
 def test_ambient_context_is_left_untouched() -> None:
@@ -773,7 +787,7 @@ def test_to_ratio_int_inputs() -> None:
         (floor_qty8(D("0.123456789")), -8),
         (floor_shares(D("2.5")), 0),
         (floor_shares(D("2.50000000")), 0),
-        (buy_qty(D("2.7"), AssetClass.EQUITY), 0),
+        (buy_qty(D("2.7"), AssetClass.EQUITY, D("1")), 0),
         (buy_qty(D("2.7"), AssetClass.CRYPTO), -8),
     ],
 )
@@ -783,7 +797,7 @@ def test_persisted_results_have_canonical_exponent(result: Decimal, exponent: in
 
 def test_check_sell_qty_equity_keeps_trailing_zero_exponent() -> None:
     # G5: on-grid input is returned unchanged, so "3.00" stays "3.00" (not floor_shares' "3").
-    assert _exp(check_sell_qty(D("3.00"), AssetClass.EQUITY)) == -2
+    assert _exp(check_sell_qty(D("3.00"), AssetClass.EQUITY, D("1"))) == -2
     assert _exp(floor_shares(D("3.00"))) == 0
 
 

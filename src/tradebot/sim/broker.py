@@ -20,7 +20,7 @@ from tradebot.data.types import AssetClass
 from tradebot.portfolio.config import EngineConfig
 from tradebot.portfolio.ledger import LedgerError
 from tradebot.portfolio.models import Dec, FillSide, LedgerEvent, PortfolioSnapshot, Stage
-from tradebot.portfolio.money import QTY8_Q, SHARE_Q, buy_qty, money_context, to_price
+from tradebot.portfolio.money import buy_qty, money_context, qty_quantum, to_price
 from tradebot.portfolio.portfolio import Portfolio
 from tradebot.sim import costs
 from tradebot.sim.orders import (
@@ -288,7 +288,9 @@ class SimBroker:
             price = costs.buy_fill_price(open_price, cost.slip_bps)
             cash = state.cash[order.sleeve_id]
             if not self._buy_affordable(qty, price, cost.fee_bps, cash):
-                qty = self._shrink_buy(qty, price, cost.fee_bps, cash, ac)
+                qty = self._shrink_buy(
+                    qty, price, cost.fee_bps, cash, ac, self._config.equity_qty_quantum
+                )
                 reason = OrderReason.SHRUNK_CASH
         else:
             price = costs.sell_fill_price(open_price, cost.slip_bps)
@@ -337,13 +339,19 @@ class SimBroker:
 
     @classmethod
     def _shrink_buy(
-        cls, qty: Decimal, price: Decimal, fee_bps: Decimal, cash: Decimal, ac: AssetClass
+        cls,
+        qty: Decimal,
+        price: Decimal,
+        fee_bps: Decimal,
+        cash: Decimal,
+        ac: AssetClass,
+        equity_quantum: Decimal,
     ) -> Decimal:
         """Largest on-grid qty below ``qty`` whose notional + fee fits in ``cash``."""
-        quantum = SHARE_Q if ac is AssetClass.EQUITY else QTY8_Q
+        quantum = qty_quantum(ac, equity_quantum)
         with money_context():
             guess = cash / (price * (1 + fee_bps / _BPS))
-        q = min(buy_qty(guess, ac), qty)
+        q = min(buy_qty(guess, ac, equity_quantum), qty)
         while q > 0 and not cls._buy_affordable(q, price, fee_bps, cash):
             q -= quantum
         return max(q, Decimal(0))

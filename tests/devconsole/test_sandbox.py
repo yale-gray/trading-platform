@@ -170,9 +170,16 @@ def test_zero_negative_or_nonfinite_quantity_raises(qty: str) -> None:
 
 
 @pytest.mark.parametrize("qty", ["1.5", "0.5"])
-def test_fractional_equity_shares_raise_bad_quantity(qty: str) -> None:
+def test_fractional_equity_shares_raise_bad_quantity_in_whole_share_mode(qty: str) -> None:
+    cfg = default_config().model_copy(update={"equity_qty_quantum": Decimal("1")})
     with pytest.raises(BadQuantityError):
-        compute_trade(AssetClass.EQUITY, qty, "100", "110")
+        compute_trade(AssetClass.EQUITY, qty, "100", "110", cfg)
+
+
+def test_fractional_equity_shares_allowed_by_default_down_to_1e6() -> None:
+    assert compute_trade(AssetClass.EQUITY, "1.5", "100", "110").qty == Decimal("1.5")
+    with pytest.raises(BadQuantityError):
+        compute_trade(AssetClass.EQUITY, "0.0000005", "100", "110")
 
 
 def test_crypto_quantity_below_eight_decimals_raises() -> None:

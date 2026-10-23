@@ -14,7 +14,7 @@ from decimal import Decimal
 from tradebot.data.types import AssetClass
 from tradebot.portfolio.config import CostConfig
 from tradebot.portfolio.models import PortfolioSnapshot
-from tradebot.portfolio.money import buy_qty, money_context, q2
+from tradebot.portfolio.money import EQUITY_QTY_QUANTUM, buy_qty, money_context, q2
 from tradebot.risk.config import RiskConfig
 from tradebot.risk.sizing import SymbolMarket
 from tradebot.sim.orders import Side
@@ -100,12 +100,17 @@ def crypto_room(equity: Decimal, risk: RiskConfig, exposure: Decimal) -> Decimal
         return risk.max_crypto_fraction * equity - exposure
 
 
-def qty_within_notional(room: Decimal, ref: Decimal, asset_class: AssetClass) -> Decimal:
+def qty_within_notional(
+    room: Decimal,
+    ref: Decimal,
+    asset_class: AssetClass,
+    equity_quantum: Decimal = EQUITY_QTY_QUANTUM,
+) -> Decimal:
     """Largest grid quantity with ``qty * ref <= room`` (0 if ``room <= 0``)."""
     if room <= 0:
         return _ZERO
     with money_context():
-        return buy_qty(room / ref, asset_class)
+        return buy_qty(room / ref, asset_class, equity_quantum)
 
 
 def unit_cash_cost(ref: Decimal, cost: CostConfig) -> Decimal:

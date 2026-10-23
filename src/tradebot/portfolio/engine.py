@@ -152,7 +152,7 @@ class PortfolioEngine:
 
     def _init_fresh(self) -> None:
         cfg = self._config
-        self._ledger = Ledger()
+        self._ledger = Ledger(equity_qty_quantum=cfg.equity_qty_quantum)
         self._portfolio = Portfolio(self._ledger)
         self._ids = OrderIdGenerator()
         self._broker = SimBroker(
@@ -182,7 +182,7 @@ class PortfolioEngine:
     def _init_from_state(self, state: EngineState) -> None:
         cfg = self._config
         try:
-            self._ledger = Ledger(state.ledger)
+            self._ledger = Ledger(state.ledger, equity_qty_quantum=cfg.equity_qty_quantum)
         except LedgerError as exc:
             raise StateCorruptionError(f"ledger does not replay: {exc}") from exc
         if state.next_seq != len(self._ledger) + 1:
@@ -612,6 +612,7 @@ class PortfolioEngine:
             ],
             stopped_out=stopped,
             sizing_equity=sizing_equity(self._plan, sleeve_id),
+            equity_qty_quantum=self._config.equity_qty_quantum,
         )
         return res, pending_orders
 

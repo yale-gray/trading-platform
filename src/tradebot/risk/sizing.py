@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from tradebot.data.types import AssetClass
-from tradebot.portfolio.money import buy_qty, money_context
+from tradebot.portfolio.money import EQUITY_QTY_QUANTUM, buy_qty, money_context
 
 VOL_FLOOR = Decimal("0.0001")
 
@@ -92,9 +92,14 @@ def target_value(weight: Decimal, sizing_equity: Decimal) -> Decimal:
         return weight * sizing_equity
 
 
-def target_quantity(value: Decimal, ref_price: Decimal, asset_class: AssetClass) -> Decimal:
+def target_quantity(
+    value: Decimal,
+    ref_price: Decimal,
+    asset_class: AssetClass,
+    equity_quantum: Decimal = EQUITY_QTY_QUANTUM,
+) -> Decimal:
     """Raw desired quantity ``value / ref``, rounded DOWN onto the asset-class grid."""
     if ref_price <= 0:
         raise ValueError(f"ref_price must be > 0, got {ref_price}")
     with money_context():
-        return buy_qty(max(value, Decimal(0)) / ref_price, asset_class)
+        return buy_qty(max(value, Decimal(0)) / ref_price, asset_class, equity_quantum)

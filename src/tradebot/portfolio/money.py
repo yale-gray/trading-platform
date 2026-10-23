@@ -202,20 +202,31 @@ def floor_qty8(d: Decimal) -> Decimal:
     return _floor_qty(d, QTY8_Q)
 
 
-def buy_qty(d: Decimal, asset_class: AssetClass) -> Decimal:
+# Default fractional-share grid (owner decision 2026-10-22).
+EQUITY_QTY_QUANTUM = Decimal("0.000001")
+
+
+def qty_quantum(asset_class: AssetClass, equity_quantum: Decimal = EQUITY_QTY_QUANTUM) -> Decimal:
+    """Quantity grid step of ``asset_class`` (equity: configurable; crypto: 1e-8)."""
+    return equity_quantum if asset_class is AssetClass.EQUITY else QTY8_Q
+
+
+def buy_qty(
+    d: Decimal, asset_class: AssetClass, equity_quantum: Decimal = EQUITY_QTY_QUANTUM
+) -> Decimal:
     """Round a BUY quantity down onto the grid of ``asset_class``."""
-    if asset_class is AssetClass.EQUITY:
-        return floor_shares(d)
-    return floor_qty8(d)
+    return _floor_qty(d, qty_quantum(asset_class, equity_quantum))
 
 
-def check_sell_qty(qty: Decimal, asset_class: AssetClass) -> Decimal:
+def check_sell_qty(
+    qty: Decimal, asset_class: AssetClass, equity_quantum: Decimal = EQUITY_QTY_QUANTUM
+) -> Decimal:
     """Validate a SELL quantity; it is never rounded, only checked."""
     if not isinstance(qty, Decimal):
         raise TypeError(f"expected Decimal, got {type(qty).__name__}")
     if not qty.is_finite() or qty <= 0:
         raise BadQuantityError(f"sell quantity must be finite and > 0, got {qty}")
-    quantum = SHARE_Q if asset_class is AssetClass.EQUITY else QTY8_Q
+    quantum = qty_quantum(asset_class, equity_quantum)
     try:
         with money_context():
             on_grid = qty == qty.quantize(quantum, rounding=ROUND_DOWN)

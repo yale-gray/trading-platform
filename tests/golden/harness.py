@@ -115,7 +115,8 @@ def load_bars() -> dict[str, pd.DataFrame]:
 
 def engine_for(sleeve_id: str | None = None) -> EngineConfig:
     """Default 50/20/20/10 fund (G4) or one sleeve at weight 1 with the fund caps relaxed."""
-    base = default_config()
+    # Goldens are pinned to whole-share mode (fractional became the default 2026-10-22).
+    base = default_config().model_copy(update={"equity_qty_quantum": Decimal("1")})
     if sleeve_id is None:
         return base
     sleeve = next(s for s in base.sleeves if s.sleeve_id == sleeve_id)

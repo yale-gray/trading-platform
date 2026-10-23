@@ -39,7 +39,7 @@ All ledger/accounting/risk-sizing code uses `decimal.Decimal`. Every function ru
 |---|---|---|---|
 | Price (open/high/low/close/fill/stop/ATR) | `Decimal` | `1e-8` | input: HALF_EVEN; buy fill price: CEILING; sell fill price: FLOOR |
 | Cash, notional, fee, market value, cost basis, P&L | `Decimal` | `0.01` (cents) | notional and market value: HALF_EVEN; fee: HALF_UP |
-| Equity quantity (whole shares) | `Decimal` (integral) | `1` | buy sizing: DOWN; sells exact |
+| Equity quantity (fractional shares) | `Decimal` | `EngineConfig.equity_qty_quantum`, default `1e-6` (must be a power of ten in `(0, 1]`; `1` = whole shares, the pre-2026-10-22 behaviour) | buy sizing: DOWN; sells exact and on the grid, so a sell can close a fractional position exactly. Owner decision 2026-10-22: stocks and ETFs trade in fractional shares so the $10k accounts can be fully invested |
 | Crypto quantity | `Decimal` | `1e-8` | buy sizing: DOWN; sells exact |
 | Weights, fractions, bps rates | `Decimal` | `1e-6` for weights from strategies; limits/bps are exact config strings | HALF_EVEN |
 | Volatility, ATR-as-ratio | `Decimal` | `1e-10` | HALF_EVEN |
@@ -99,7 +99,7 @@ Run inside `submit_target_weights`, per sleeve in config order, symbols alphabet
 | R3 | **25% max per asset**, measured on the symbol's exposure across **all sleeves**: `room = 0.25 × portfolio_equity − (Σ_sleeves mv(symbol) + pending BUY notional of symbol)`, equity = last close snapshot | **Shrink** to `room`; reject if `room <= 0` | `MAX_ASSET_SHRUNK`, `MAX_ASSET` |
 | R4 | **30% max crypto**, same measurement over all crypto symbols and sleeves | **Shrink** to room; reject if none | `MAX_CRYPTO_SHRUNK`, `MAX_CRYPTO` |
 | R5 | Sleeve cash: `notional + fee ≤ sleeve_cash − reserved_cash`. No borrowing from other sleeves | **Shrink** | `CASH_SHRUNK` |
-| R6 | Rounding to whole shares / 1e-8, then minimum size: qty `> 0` and `notional ≥ min_trade_fraction × sizing_equity` (not applied to full exits) | **Reject** | `BELOW_MIN_SIZE` |
+| R6 | Rounding to the equity quantum (default 1e-6; whole shares when `equity_qty_quantum = 1`) / 1e-8, then minimum size: qty `> 0` and `notional ≥ min_trade_fraction × sizing_equity` (not applied to full exits) | **Reject** | `BELOW_MIN_SIZE` |
 
 **Policy:** a *limit* breach **shrinks** (keeps the intent, trims to what is allowed; R3, R4, R5), because the strategy wanted the position and part of it is legal. A *hard block* (kill switch, missing data, stop lock, nothing fits, rounding to zero) **rejects**. The tightest of R3/R4/R5 wins since they apply sequentially to a shrinking amount.
 Pending BUY notionals accumulate within the call, so a later symbol sees earlier ones. Pending SELLs are **not** credited against exposure (conservative; level-triggered targets retry next bar).
@@ -236,7 +236,7 @@ Checked by `engine.verify()` and by property tests after every `process_bar` and
 7. **I7** Ledger `seq` is dense and strictly increasing; events are never mutated (hash of prefix is stable across steps); `CASH_TRANSFER_OUT` and `IN` amounts sum to zero per `transfer_id`; transfers never change portfolio equity.
 8. **I8** No lookahead: every fill has `fill_asof > created_asof`, `fill_price` derives from that bar's **open** only; a FILL never uses a close or any later bar.
 9. **I9** Costs: BUY `fill_price >= open`, SELL `fill_price <= open`; `fee == q2_half_up(notional × fee_bps/1e4)`; equity fee == 0.
-10. **I10** After any accepted BUY order set, `symbol exposure <= 25%` and `crypto exposure <= 30%` of reference equity (at submission); orders that would breach are shrunk (never over the limit by more than rounding to one share/1e-8).
+10. **I10** After any accepted BUY order set, `symbol exposure <= 25%` and `crypto exposure <= 30%` of reference equity (at submission); orders that would breach are shrunk (never over the limit by more than rounding to one equity quantum/1e-8).
 11. **I11** While killed: no BUY order is created or filled; SELLs still fill.
 12. **I12** Kill switch trips iff `1 − equity/peak >= 0.20` at a close; `peak_equity` never decreases except via manual reset; reset requires explicit call.
 13. **I13** Stop level never decreases while the position is open; STOP orders are full-position SELLs filling next bar open.
@@ -253,7 +253,7 @@ Checked by `engine.verify()` and by property tests after every `process_bar` and
 4. Trailing stop triggers at `close <= max(close since entry) − 2.5×ATR14`, produces a next-open SELL, then locks re-entry until the strategy goes flat once.
 5. Kill switch trips at 20.00% drawdown, blocks BUYs, allows SELLs/stops, freezes rebalance, and survives `export_state()`/restore; only `reset_kill_switch` (reached via CLI only) clears it.
 6. Monthly rebalance returns a drifted portfolio to 50/20/20/10 (within tolerance) using only cash transfers and strategy-driven sells.
-7. Whole shares for equities, 8-dp for crypto; sub-share targets reject `BELOW_MIN_SIZE`.
+7. Equity quantity on the `equity_qty_quantum` grid (default 1e-6; 1 = whole shares), 8-dp for crypto; targets that round to 0 or fall below the minimum notional reject `BELOW_MIN_SIZE`.
 8. All invariants I1–I17 hold under property tests with random bar paths and random target weights.
 9. Backtest and runner paths both go through `PortfolioEngine`; replaying a persisted run in chunks (with restore between) yields an identical ledger.
 10. Nothing under `sim/`, `risk/`, `portfolio/` imports a network/broker library or reads env/keys.
@@ -297,7 +297,7 @@ T2-T5 depend only on T1, so they run in parallel in Wave 2 (T4 takes fee/slip bp
 | `q2_half_up(d: Decimal) -> Decimal` | quantize to `CENT_Q`; used for fees | HALF_UP (away from zero on ties) |
 | `floor_shares(d: Decimal) -> Decimal` | whole shares for equity BUY sizing, `quantize(SHARE_Q, ROUND_DOWN)`; `BadQuantityError` if `d < 0` | DOWN |
 | `floor_qty8(d: Decimal) -> Decimal` | crypto BUY sizing, `quantize(QTY8_Q, ROUND_DOWN)`; `BadQuantityError` if `d < 0` | DOWN |
-| `buy_qty(d: Decimal, asset_class: AssetClass) -> Decimal` | dispatches to `floor_shares` (EQUITY) or `floor_qty8` (CRYPTO) | DOWN |
+| `buy_qty(d: Decimal, asset_class: AssetClass, equity_quantum: Decimal = EQUITY_QTY_QUANTUM) -> Decimal` | rounds DOWN onto the equity quantum (EQUITY) or the 1e-8 grid (CRYPTO); `floor_shares` is kept for back-compat. `check_sell_qty` and `target_quantity` take the same optional quantum | DOWN |
 | `check_sell_qty(qty: Decimal, asset_class: AssetClass) -> Decimal` | SELL quantities are exact, never rounded: returns `qty` unchanged if already on-grid (integral for EQUITY, at most 8 decimals for CRYPTO), else `BadQuantityError`; `qty <= 0` also `BadQuantityError` | none |
 | `q_ratio(d: Decimal) -> Decimal` / `q_weight(d: Decimal) -> Decimal` | quantize to `RATIO_Q` / `WEIGHT_Q` | HALF_EVEN |
 | `to_text(d: Decimal) -> str` | canonical persistence form: `str(d)` computed in the explicit money context (capitals=1), with `-0` normalised to `0` (exponent kept); `TypeError` if not `Decimal` | n/a |

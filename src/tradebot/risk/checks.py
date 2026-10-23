@@ -15,7 +15,7 @@ from decimal import Decimal
 from tradebot.data.types import AssetClass
 from tradebot.portfolio.config import CostConfig, SleeveConfig
 from tradebot.portfolio.models import PortfolioSnapshot
-from tradebot.portfolio.money import check_sell_qty, money_context, q2
+from tradebot.portfolio.money import EQUITY_QTY_QUANTUM, check_sell_qty, money_context, q2
 from tradebot.risk.config import RiskConfig
 from tradebot.risk.limits import (
     PendingOrder,
@@ -71,6 +71,7 @@ def check_target_weights(
     stopped_out: Collection[str] = (),
     sizing_equity: Decimal | None = None,
     origin: OrderOrigin = OrderOrigin.STRATEGY,
+    equity_qty_quantum: Decimal = EQUITY_QTY_QUANTUM,
 ) -> CheckResult:
     """Size a sleeve's target weights and run R0-R6 on the resulting deltas.
 
@@ -93,6 +94,7 @@ def check_target_weights(
             frozenset(stopped_out),
             sizing_equity,
             origin,
+            equity_qty_quantum,
         )
 
 
@@ -107,6 +109,7 @@ def _run(
     stopped_out: frozenset[str],
     sizing_equity_in: Decimal | None,
     origin: OrderOrigin,
+    eq_q: Decimal,
 ) -> CheckResult:
     sleeve_snap = next((s for s in snapshot.sleeves if s.sleeve_id == sleeve.sleeve_id), None)
     if sleeve_snap is None:
@@ -178,13 +181,13 @@ def _run(
             # Exit / absent: full exit of what is sellable; no price needed.
             if sellable > 0 and proj > 0:
                 qty = min(sellable, proj)
-                sells.append(_sell(sleeve, sym, qty, m, origin))
+                sells.append(_sell(sleeve, sym, qty, m, origin, eq_q))
                 pending.append(PendingOrder(sleeve.sleeve_id, sym, Side.SELL, qty))
             continue
         assert m is not None and m.ref_price is not None
         ref = m.ref_price
         tval = target_value(w2, seq_equity)
-        tqty = target_quantity(tval, ref, m.asset_class)
+        tqty = target_quantity(tval, ref, m.asset_class, eq_q)
         target_qty[sym] = tqty
         min_notional = sleeve.min_trade_fraction * seq_equity
 
@@ -196,7 +199,7 @@ def _run(
             if not full_exit and q2(qty * ref) < min_notional:
                 rejections.append(Rejection(sym, OrderReason.BELOW_MIN_SIZE, qty, _ZERO))
                 continue
-            sells.append(_sell(sleeve, sym, qty, m, origin))
+            sells.append(_sell(sleeve, sym, qty, m, origin, eq_q))
             pending.append(PendingOrder(sleeve.sleeve_id, sym, Side.SELL, qty))
             continue
 
@@ -225,7 +228,7 @@ def _run(
             reject(OrderReason.MAX_ASSET)
             continue
         if qty * ref > room:
-            qty = qty_within_notional(room, ref, m.asset_class)
+            qty = qty_within_notional(room, ref, m.asset_class, eq_q)
             rejections.append(Rejection(sym, OrderReason.MAX_ASSET_SHRUNK, requested, qty))
         # R4: crypto cap.
         if m.asset_class is AssetClass.CRYPTO and qty > 0:
@@ -234,7 +237,7 @@ def _run(
                 reject(OrderReason.MAX_CRYPTO)
                 continue
             if qty * ref > croom:
-                qty = qty_within_notional(croom, ref, m.asset_class)
+                qty = qty_within_notional(croom, ref, m.asset_class, eq_q)
                 rejections.append(Rejection(sym, OrderReason.MAX_CRYPTO_SHRUNK, requested, qty))
         # R5: sleeve cash minus reservations.
         if qty > 0:
@@ -244,7 +247,7 @@ def _run(
                 continue
             unit = unit_cash_cost(ref, costs[m.asset_class])
             if qty * unit > avail:
-                qty = qty_within_notional(avail, unit, m.asset_class)
+                qty = qty_within_notional(avail, unit, m.asset_class, eq_q)
                 rejections.append(Rejection(sym, OrderReason.CASH_SHRUNK, requested, qty))
         # R6: minimum size (qty already on the grid).
         if qty <= 0 or q2(qty * ref) < min_notional:
@@ -266,9 +269,10 @@ def _sell(
     qty: Decimal,
     market: SymbolMarket | None,
     origin: OrderOrigin,
+    eq_q: Decimal,
 ) -> OrderRequest:
     if market is not None:
-        check_sell_qty(qty, market.asset_class)
+        check_sell_qty(qty, market.asset_class, eq_q)
     return OrderRequest(
         sleeve_id=sleeve.sleeve_id, symbol=symbol, side=Side.SELL, qty=qty, origin=origin
     )

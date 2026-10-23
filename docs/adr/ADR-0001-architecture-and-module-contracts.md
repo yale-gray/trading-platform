@@ -76,7 +76,7 @@ The five leads wrote their specs in parallel. Each spec is sound on its own term
 
 ### D7. Money
 - In memory: `Decimal`, using **SPEC-003 §2's quanta and rounding table**. That table is the single source of truth, and SPEC-005's hand-worked cases must be re-checked against it.
-- Equities trade in whole shares; crypto in 1e-8 units. No shorting and no leverage.
+- Equities trade in fractional shares on a 1e-6 grid by default (`EngineConfig.equity_qty_quantum`; `1` = whole-share mode, used by the goldens; owner decision 2026-10-22, A20). Crypto trades in 1e-8 units. No shorting and no leverage.
 - **In SQLite, money and quantities are stored as `TEXT` Decimal strings** (canonical `str(Decimal)`). SPEC-004's integer `*_cents / qty_e8 / price_e6` columns are replaced. The reasons:
   1. They match `EngineState` JSON one to one.
   2. No second rounding layer is introduced.
@@ -245,6 +245,8 @@ Each account is a separate portfolio with its own ledger, kill switch and benchm
 - After a kill-switch re-arm, every strategy sleeve gets one forced decision on the next bar.
 - S&P 500 results always carry the label "current S&P 500 constituents (survivorship-biased)" (spec ids starting `stocks_`).
 - Portfolios tripped before A18 will auto re-arm after 20 bars. Moot today, since no live portfolios exist.
+
+**A20. Fractional shares (owner decision 2026-10-22).** Stocks and ETFs trade in fractions down to 0.000001 of a share, like most brokers, so $10k accounts can be fully invested. Whole-share mode remains available (`equity_qty_quantum=1`). Existing whole-share ledgers stay valid.
 
 ## Consequences
 - **One loop (`BarDriver`) and one engine** mean a backtest result and a paper result for the same bars must match exactly. SPEC-005 can test that directly.

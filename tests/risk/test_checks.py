@@ -83,6 +83,7 @@ def _check(
     *,
     pending: tuple[PendingOrder, ...] = (),
     stopped_out: tuple[str, ...] = (),
+    quantum: str = "1",  # whole-share mode by default: the hand-computed cases below
 ) -> CheckResult:
     return check_target_weights(
         sleeve=_sleeve(sid),
@@ -93,6 +94,7 @@ def _check(
         costs=CFG.costs,
         pending=pending,
         stopped_out=stopped_out,
+        equity_qty_quantum=D(quantum),
     )
 
 
@@ -214,6 +216,31 @@ def test_r6_sub_share_entry_rejects_below_min_size() -> None:
     res = _check(_snap(pf), CORE, {"SPY": "0.0001"}, {"SPY": _mk("SPY")})
     assert res.orders == ()
     assert res.rejections == (Rejection("SPY", R.BELOW_MIN_SIZE, D("0"), D("0")),)
+
+
+def test_r6_min_size_rejects_fractional_dust_and_sub_quantum_targets() -> None:
+    pf = _book({CORE: "50000", MR: "50000"})
+    # Target 0.0001 x 50000 = 5.00 -> 0.05 shares (fractional, on the 1e-6 grid), but
+    # 5.00 < min notional 0.005 x 50000 = 250 -> BELOW_MIN_SIZE, requested 0.05.
+    res = _check(_snap(pf), CORE, {"SPY": "0.0001"}, {"SPY": _mk("SPY")}, quantum="0.000001")
+    assert res.orders == ()
+    assert res.rejections == (Rejection("SPY", R.BELOW_MIN_SIZE, D("0.05"), D("0")),)
+    # Target 1e-11 x 50000 = 5e-7 -> 5e-9 shares -> 0 at the 1e-6 grid: BELOW_MIN_SIZE too.
+    res = _check(_snap(pf), CORE, {"SPY": "0.00000000001"}, {"SPY": _mk("SPY")}, quantum="0.000001")
+    assert res.orders == ()
+    assert res.rejections == (Rejection("SPY", R.BELOW_MIN_SIZE, D("0"), D("0")),)
+    # Above the minimum: w = 0.006 -> target 300 -> 3 shares at 100, same as whole-share mode.
+    res = _check(_snap(pf), CORE, {"SPY": "0.00655"}, {"SPY": _mk("SPY")}, quantum="0.000001")
+    assert res.orders == (_order(CORE, "SPY", Side.BUY, "3.275"),)
+
+
+def test_r5_cash_shrinks_to_affordable_fractional_shares() -> None:
+    # Core cash 6000; target 6000 / 100 = 60. Unit cost 100.05. Shrink to
+    # floor(6000 / 100.05) at 1e-6 = 59.970014... -> 59.970014.
+    pf = _book({CORE: "6000", MR: "94000"})
+    res = _check(_snap(pf), CORE, {"SPY": "1.0"}, {"SPY": _mk("SPY")}, quantum="0.000001")
+    assert res.orders == (_order(CORE, "SPY", Side.BUY, "59.970014"),)
+    assert res.rejections == (Rejection("SPY", R.CASH_SHRUNK, D("60"), D("59.970014")),)
 
 
 def test_r6_entry_below_min_notional_rejects_and_above_passes() -> None:

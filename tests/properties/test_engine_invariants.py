@@ -54,7 +54,7 @@ CORE = "core_momentum"
 
 def config_for(scn: Scenario) -> EngineConfig:
     """Default sleeves, trailing stops on two of them, the scenario's kill threshold."""
-    base = default_config()
+    base = default_config().model_copy(update={"equity_qty_quantum": Decimal("1")})
     sleeves = tuple(
         s.model_copy(update={"trailing_stop_atr_mult": scn.stop_mult})
         if s.sleeve_id in ("mean_reversion", "crypto_trend")

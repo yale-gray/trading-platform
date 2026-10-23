@@ -90,7 +90,7 @@ def compute_trade(
     cfg = config if config is not None else default_config()
     cost = cfg.costs[asset_class]
     q_in = _positive(qty, "quantity")
-    q = buy_qty(q_in, asset_class)
+    q = buy_qty(q_in, asset_class, cfg.equity_qty_quantum)
     if q != q_in:
         raise BadQuantityError(f"quantity {q_in} is not allowed for {asset_class}: use {q}")
     if q <= 0:

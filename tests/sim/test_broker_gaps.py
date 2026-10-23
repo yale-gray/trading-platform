@@ -34,10 +34,14 @@ D1, D2, D3 = (date(2024, 1, 2) + timedelta(days=i) for i in range(3))
 CORE = "core_momentum"
 
 
-def _broker(cash: str = "10000.00") -> SimBroker:
+def _broker(cash: str = "10000.00", quantum: str = "1") -> SimBroker:
     led = Ledger()
     led.append(asof=D1, stage=Stage.CLOSE, sleeve_id=CORE, type=EventType.DEPOSIT, amount=D(cash))
-    return SimBroker(default_config(), Portfolio(led), id_gen=OrderIdGenerator())
+    return SimBroker(
+        default_config().model_copy(update={"equity_qty_quantum": D(quantum)}),
+        Portfolio(led),
+        id_gen=OrderIdGenerator(),
+    )
 
 
 def _bar(sym: str, px: float) -> Bar:
@@ -201,7 +205,7 @@ def _bars(spy_open: float, spy_close: float) -> dict[str, Bar]:
 
 
 def _engine_config():
-    base = default_config()
+    base = default_config().model_copy(update={"equity_qty_quantum": D("1")})
     sleeves = tuple(
         s.model_copy(update={"trailing_stop_atr_mult": D("1.5")})
         if s.sleeve_id == "mean_reversion"

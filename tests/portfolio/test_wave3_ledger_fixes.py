@@ -29,7 +29,7 @@ BUY, SELL = FillSide.BUY, FillSide.SELL
 
 
 def _led(**sleeves: str) -> Ledger:
-    led = Ledger()
+    led = Ledger(equity_qty_quantum=D("1"))  # whole-share mode (I4 pinned to quantum 1)
     for sid, amt in (sleeves or {"core": "1000.00"}).items():
         led.append(asof=D1, stage=Stage.CLOSE, sleeve_id=sid, type=EventType.DEPOSIT, amount=D(amt))
     return led
@@ -96,9 +96,17 @@ def test_fill_price_and_qty_grids() -> None:
         _fill(led, BUY, "1", "1.0000000001")
     with pytest.raises(ValidationError):  # qty 1E-9 has 9 dp
         _fill(led, BUY, "1E-9", "100", sym="BTC/USD")
-    with pytest.raises(LedgerError, match="whole shares"):
+    with pytest.raises(LedgerError, match="1 grid"):
         _fill(led, BUY, "1.5", "100")  # equity must be integral
     assert len(led) == 1
+    # Finer equity grid: 1.5 is fine at quantum 0.5, and a 1e-6 grid rejects 1e-7.
+    fine = Ledger(equity_qty_quantum=D("0.000001"))
+    fine.append(
+        asof=D1, stage=Stage.CLOSE, sleeve_id="core", type=EventType.DEPOSIT, amount=D("1000.00")
+    )
+    _fill(fine, BUY, "1.5", "100")
+    with pytest.raises(LedgerError, match="grid"):
+        _fill(fine, BUY, "0.0000001", "100")
     _fill(led, BUY, "0.5", "100.00000001", sym="BTC/USD")  # 8 dp qty/price fine
     # 0.5 * 100.00000001 = 50.000000005 -> half-even to cents = 50.00
     assert led.state.cash["core"] == D("950.00")
@@ -272,7 +280,9 @@ def test_verify_with_state_skips_replay_but_full_replay_available(monkeypatch) -
     assert snap.equity == D("1520.00")
     calls: list[int] = []
     real = replay
-    monkeypatch.setattr(portfolio_mod, "replay", lambda evs: calls.append(1) or real(evs))
+    monkeypatch.setattr(
+        portfolio_mod, "replay", lambda evs, q=None: calls.append(1) or real(evs, q)
+    )
     pf.verify(snap)  # default: replays (old behaviour)
     assert calls == [1]
     pf.verify(snap, state=pf.ledger.state)  # folded state given: no replay

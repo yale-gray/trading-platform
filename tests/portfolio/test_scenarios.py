@@ -75,6 +75,7 @@ def make_config(*, mr_stop_mult: str | None = None, mr_allows_crypto: bool = Fal
         sleeves=tuple(sleeves),
         risk=base.risk,
         costs=base.costs,
+        equity_qty_quantum=Decimal("1"),  # hand-computed whole-share scenarios
     )
 
 
@@ -107,7 +108,7 @@ def test_cross_sleeve_spy_cap_shrinks_second_sleeve() -> None:
       = 10000 -> 100 sh, MAX_ASSET_SHRUNK (requested 160, accepted 100).
     Total pending SPY notional = 25000 = 25% of 100000.
     """
-    eng = PortfolioEngine(default_config())
+    eng = PortfolioEngine(make_config())
     eng.process_bar(JAN2, book(bar(SPY, 100.0, 100.0)))
 
     core = eng.submit_target_weights(CORE, {SPY: 0.30}, JAN2)
@@ -261,7 +262,7 @@ def test_kill_switch_blocks_buys_allows_exits_cancels_pending_and_freezes_rebala
       Sell 250 at floor8(20 x 0.9995) = 19.99 -> 4997.50. Equity = 79985.00 (cash only).
     * Reset: peak = last equity 79985.00. Mean reversion BUY 500 at 20 = 10000 now fits.
     """
-    eng = PortfolioEngine(default_config())
+    eng = PortfolioEngine(make_config())
     eng.process_bar(JAN2, book(bar(SPY, 100.0, 100.0)))
     assert [o.qty_requested for o in eng.submit_target_weights(CORE, {SPY: 0.5}, JAN2).orders] == [
         Decimal(250)
@@ -332,7 +333,7 @@ def test_month_boundary_rebalance_moves_sleeves_to_targets_with_cash_only() -> N
     * After: core 26331.83 + 218 x 120 = 52491.83; mr 20997.50; crypto 20997.50;
       cash 10498.75. Total 104985.58 (the 1.92 difference is the sell slippage).
     """
-    eng = PortfolioEngine(default_config())
+    eng = PortfolioEngine(make_config())
     eng.process_bar(JAN2, book(bar(SPY, 100.0, 100.0)))
     eng.submit_target_weights(CORE, {SPY: 0.5}, JAN2)
     eng.process_bar(JAN3, book(bar(SPY, 100.0, 100.0)))
@@ -388,7 +389,7 @@ def test_friday_orders_fill_crypto_on_saturday_and_etf_on_monday() -> None:
     * SUN JAN7: only BTC has a bar. Nothing to fill; SPY waits (count 2).
     * MON JAN8: SPY opens at 100, so the SPY BUY fills at 100.05 with fill_asof JAN8.
     """
-    eng = PortfolioEngine(default_config())
+    eng = PortfolioEngine(make_config())
     fri = book(bar(SPY, 100.0, 100.0), bar(BTC, 100.0, 100.0, vol20=0.02))
     eng.process_bar(JAN5, fri)
     spy_order = eng.submit_target_weights(CORE, {SPY: 0.3}, JAN5).orders[0]
@@ -430,7 +431,7 @@ def test_entry_asof_follows_add_trim_full_exit_and_reentry() -> None:
       Cash = 49985.10. Re-entry: 0.2 x 49985.10 = 9997.02 -> 99 sh (fills JAN9).
     * JAN9: re-entry fills. entry_asof = JAN9 (a new episode).
     """
-    eng = PortfolioEngine(default_config())
+    eng = PortfolioEngine(make_config())
     eng.process_bar(JAN2, book(bar(SPY, 100.0, 100.0)))
     assert [o.qty_requested for o in eng.submit_target_weights(CORE, {SPY: 0.2}, JAN2).orders] == [
         Decimal(100)

@@ -15,7 +15,8 @@ Rules enforced by the fold (so also on a hand-made event list):
 
 * a FILL's ``order_id`` is unique (I14); a FEE must follow a FILL of the same
   order and sleeve, at most one FEE per order;
-* equity fill quantities are whole shares; crypto quantities have at most 8 dp
+* equity fill quantities lie on the configured equity grid (``equity_qty_quantum``;
+  whole shares when 1, else any grid up to 8 dp when unset); crypto quantities have at most 8 dp
   (the 8 dp / 1e-8 price grid for every fill is enforced by ``LedgerEvent``);
 * a DEPOSIT is initial funding only: it must precede every FILL in its sleeve;
 * a SELL whose proceeds round to 0.00 is rejected unless it is a full exit of
@@ -55,7 +56,9 @@ class LedgerError(ValueError):
 class LedgerState:
     """Per-sleeve cash and positions, plus running totals for I6."""
 
-    def __init__(self) -> None:
+    def __init__(self, equity_qty_quantum: Decimal | None = None) -> None:
+        # None: equity quantities need only be on the 8 dp grid (no config known).
+        self.equity_qty_quantum = equity_qty_quantum
         self.cash: dict[str, Decimal] = {}
         self.positions: dict[str, dict[str, Position]] = {}
         self.deposits = ZERO
@@ -185,7 +188,7 @@ class LedgerState:
         assert ev.order_id is not None and ev.symbol is not None and ev.qty is not None
         if ev.order_id in self.fill_orders:
             raise LedgerError(f"seq {ev.seq}: duplicate FILL for order {ev.order_id} (I14)")
-        check_qty_grid(ev.symbol, ev.qty, f"seq {ev.seq}")
+        check_qty_grid(ev.symbol, ev.qty, f"seq {ev.seq}", self.equity_qty_quantum)
 
     def _record_fill(self, ev: LedgerEvent) -> None:
         assert ev.order_id is not None
@@ -261,7 +264,7 @@ class LedgerState:
 
     def copy(self) -> LedgerState:
         """Independent copy (positions are frozen models, so shallow dict copies suffice)."""
-        new = LedgerState()
+        new = LedgerState(self.equity_qty_quantum)
         new.cash = dict(self.cash)
         new.positions = {s: dict(b) for s, b in self.positions.items()}
         new.deposits, new.fees, new.realized = self.deposits, self.fees, self.realized
@@ -274,19 +277,32 @@ class LedgerState:
         return new
 
 
-def check_qty_grid(symbol: str, qty: Decimal, where: str = "") -> None:
-    """I4: equity quantities are whole shares; crypto has at most 8 dp (``qty > 0``)."""
+def check_qty_grid(
+    symbol: str, qty: Decimal, where: str = "", equity_quantum: Decimal | None = None
+) -> None:
+    """I4: equity qty on the ``equity_quantum`` grid, crypto at most 8 dp (``qty > 0``).
+
+    ``equity_quantum=None`` means no config is known: equity needs only the 8 dp grid.
+    """
     if qty <= 0:
         raise LedgerError(f"{where}: quantity {qty} of {symbol} must be > 0")
-    if asset_class(symbol) is AssetClass.EQUITY and qty != qty.to_integral_value():  # type: ignore[arg-type]
-        raise LedgerError(f"{where}: equity {symbol} quantity {qty} is not whole shares (I4)")
+    if (
+        equity_quantum is not None
+        and asset_class(symbol) is AssetClass.EQUITY
+        and not on_grid(qty, equity_quantum)
+    ):
+        raise LedgerError(
+            f"{where}: equity {symbol} quantity {qty} is off the {equity_quantum} grid (I4)"
+        )
     if not on_grid(qty, QTY8_Q):
         raise LedgerError(f"{where}: {symbol} quantity {qty} has more than 8 decimals (I4)")
 
 
-def replay(events: Iterable[LedgerEvent]) -> LedgerState:
+def replay(
+    events: Iterable[LedgerEvent], equity_qty_quantum: Decimal | None = None
+) -> LedgerState:
     """Fold events (in order) into per-sleeve cash and positions."""
-    state = LedgerState()
+    state = LedgerState(equity_qty_quantum)
     for ev in events:
         state.apply(ev)
     return state
@@ -300,6 +316,7 @@ class Ledger:
         events: Iterable[LedgerEvent] = (),
         *,
         expected_fee: Callable[[LedgerEvent], Decimal] | None = None,
+        equity_qty_quantum: Decimal | None = None,
     ) -> None:
         """Build a ledger by folding ``events`` (dense ``seq`` from 1).
 
@@ -310,7 +327,8 @@ class Ledger:
         be told from a zero-fee fill, but a FEE with no FILL is always rejected.
         """
         self._events: list[LedgerEvent] = []
-        self._state = LedgerState()
+        self.equity_qty_quantum = equity_qty_quantum
+        self._state = LedgerState(equity_qty_quantum)
         for ev in events:
             self._commit(ev)
         bad = self._state.unpaired_transfers()

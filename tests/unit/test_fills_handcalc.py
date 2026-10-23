@@ -233,7 +233,9 @@ def test_etf_whole_share_sizing_rounds_down_then_fills_at_open() -> None:
     # Fill at D2 open 33.40: ceil8(33.40 x 1.0005) = ceil8(33.41670000) = 33.41670000.
     # notional = q2(300 x 33.41670000) = q2(10025.01000) = 10025.01 ; fee 0.00.
     # The fill (10025.01) exceeds the target value because sizing uses the ref close.
-    eng = PortfolioEngine(default_config())
+    eng = PortfolioEngine(
+        default_config().model_copy(update={"equity_qty_quantum": Decimal("1")})  # whole-share mode
+    )
     eng.process_bar(D1, {"SPY": _bar("SPY", 33.33, 33.33)})
     res = eng.submit_target_weights(CORE, {"SPY": 0.2}, D1)
     assert res.orders[0].qty_requested == Decimal("300")

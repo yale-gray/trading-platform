@@ -10,7 +10,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, field_serializer, field_validator, model_validator
 
 from tradebot.data.types import AssetClass
-from tradebot.portfolio.money import CENT_Q, money_context
+from tradebot.portfolio.money import CENT_Q, EQUITY_QTY_QUANTUM, money_context
 from tradebot.risk.config import RiskConfig, reject_float
 
 _BPS_CAP = Decimal(10000)  # slip or fee at or above 100% is nonsensical; keeps sell prices > 0
@@ -94,6 +94,24 @@ class EngineConfig(BaseModel):
     sleeves: tuple[SleeveConfig, ...]
     risk: RiskConfig
     costs: Mapping[AssetClass, CostConfig]
+    # Equity quantity grid: 1 = whole shares; default 1e-6 = fractional shares
+    # (owner decision 2026-10-22). Crypto stays at 1e-8.
+    equity_qty_quantum: Decimal = EQUITY_QTY_QUANTUM
+
+    @field_validator("equity_qty_quantum", mode="before")
+    @classmethod
+    def _quantum_no_floats(cls, value: Any) -> Any:
+        return reject_float(value)
+
+    @field_validator("equity_qty_quantum")
+    @classmethod
+    def _quantum_in_range(cls, value: Decimal) -> Decimal:
+        if not value.is_finite() or value <= 0 or value > 1:
+            raise ValueError(f"equity_qty_quantum must be > 0 and <= 1, got {value}")
+        if value.normalize().as_tuple().digits != (1,):
+            # The money helpers quantize by exponent, so the grid must be 10**-k.
+            raise ValueError(f"equity_qty_quantum must be a power of ten, got {value}")
+        return value
 
     @field_validator("initial_capital", mode="before")
     @classmethod

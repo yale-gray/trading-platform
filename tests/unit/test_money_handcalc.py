@@ -121,7 +121,7 @@ def test_etf_bar_end_equity_while_holding() -> None:
 
 def test_etf_buy_sizing_keeps_whole_hundred_shares() -> None:
     # 100 is already on the 1-share grid; floor_shares leaves it unchanged, exponent 0.
-    qty = buy_qty(Decimal("100"), AssetClass.EQUITY)
+    qty = buy_qty(Decimal("100"), AssetClass.EQUITY, Decimal("1"))
     assert qty == Decimal("100")
     assert _exp(qty) == 0
 
@@ -299,7 +299,7 @@ def test_equity_sizing_target_rounds_down_to_300_shares() -> None:
     qty = floor_shares(raw)
     assert qty == Decimal("300")
     assert _exp(qty) == 0
-    assert buy_qty(raw, AssetClass.EQUITY) == Decimal("300")
+    assert buy_qty(raw, AssetClass.EQUITY, Decimal("1")) == Decimal("300")
 
 
 def test_equity_sized_buy_fill_notional_and_cash_out() -> None:
@@ -355,7 +355,7 @@ def test_equity_sizing_tail_above_half_rounds_down_to_142_shares() -> None:
     qty = floor_shares(raw)
     assert qty == Decimal("142")
     assert _exp(qty) == 0
-    assert buy_qty(raw, AssetClass.EQUITY) == Decimal("142")
+    assert buy_qty(raw, AssetClass.EQUITY, Decimal("1")) == Decimal("142")
 
 
 def test_crypto_sizing_tail_above_half_rounds_down_at_1e8() -> None:

@@ -10,6 +10,7 @@ from tradebot.api.deps import Db
 from tradebot.api.schemas import RunnerStatus, SleeveStatus
 from tradebot.db import repo
 from tradebot.db.models import RunnerHeartbeat
+from tradebot.runner.clock import next_equity_run_after
 
 router = APIRouter(prefix="/runner", tags=["runner"])
 
@@ -37,4 +38,5 @@ def runner_status(db: Db, request: Request) -> RunnerStatus:
         alive=bool(hb and now - hb.ts <= ALIVE_WITHIN),
         last_heartbeat=hb.ts if hb else None,
         sleeves=rows,
+        next_run_after=next_equity_run_after(request.app.state.clock.now()),
     )

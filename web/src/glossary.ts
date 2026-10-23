@@ -1,0 +1,21 @@
+/** One shared glossary used by the ⓘ tooltips and the Learn page. */
+export const GLOSSARY: Record<string, { term: string; text: string }> = {
+  return: { term: "Total return", text: "How much the account has grown (or shrunk) since it started, as a percentage." },
+  drawdown: { term: "Worst drop (drawdown)", text: "The biggest fall from a high point to a later low. It shows how bumpy the ride has been." },
+  benchmark: { term: "Benchmark", text: "A simple yardstick to compare against, here just buying and holding SPY. If the bot can't beat it, simpler is better." },
+  spy: { term: "SPY", text: "A fund that holds the 500 biggest US companies (the S&P 500) in one purchase." },
+  qqq: { term: "QQQ", text: "A fund that holds about 100 large technology-heavy US companies." },
+  indexfund: { term: "Index fund", text: "One purchase that gives you a small slice of many companies, so you aren't betting on a single one." },
+  etf: { term: "ETF", text: "A fund you can buy and sell like a single stock." },
+  rebalance: { term: "Rebalance", text: "Nudging the account back to its target mix, for example 50% / 40% / 10%, by selling a little of what grew and buying what lagged." },
+  killswitch: { term: "Kill switch", text: "A safety brake. If the account falls 20% from its peak, the bot stops buying for a while. Selling still works." },
+  stoploss: { term: "Stop-loss", text: "A rule that sells a holding if it falls by a set amount, to limit a bad loss." },
+  momentum: { term: "Momentum", text: "The idea that things rising lately tend to keep rising for a while." },
+  cap: { term: "Position cap", text: "A limit on how much of the account can sit in one holding (25%) or one kind of asset (30%)." },
+  survivorship: { term: "Survivorship bias", text: "Testing only on companies that are still around today makes old results look better than they really were." },
+  paper: { term: "Simulated money", text: "Practice money. Trades are pretend, so nothing real is ever at risk." },
+  sparkline: { term: "Sparkline", text: "A tiny chart showing the recent trend at a glance." },
+  sortino: { term: "Sortino ratio", text: "Return earned per unit of downside risk. Higher is better." },
+  sharpe: { term: "Sharpe ratio", text: "Return earned per unit of overall ups and downs. Higher is better." },
+  daytrading: { term: "Day trading", text: "Buying and selling within the same day, holding nothing overnight." },
+};

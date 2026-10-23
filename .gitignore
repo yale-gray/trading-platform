@@ -12,3 +12,6 @@ data/cache/
 *.db-shm
 *.db-wal
 *.db-journal
+web/node_modules/
+web/dist/
+logs/

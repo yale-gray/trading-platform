@@ -11,6 +11,15 @@ uv sync
 uv run pytest
 ```
 
+## Using the app
+
+```bash
+npm --prefix web install && npm --prefix web run build   # once
+uv run tradebot api serve
+```
+
+Then open http://127.0.0.1:8000. To start the API and the runner automatically at login, run `scripts/service/tradebot-service.sh install` (see [docs/AUTOSTART.md](docs/AUTOSTART.md)).
+
 ## Dev console (local)
 
 A read-only Streamlit app for looking at the project between build waves: progress, price charts, the strategies in plain English, a cost sandbox, and review reports. It shows generated practice data by default and never trades or changes anything.

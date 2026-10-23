@@ -22,6 +22,7 @@ from tradebot.api.schemas import (
     SleeveBreakdown,
     TradeOut,
 )
+from tradebot.data.universe import SP500_LABEL, is_sp500_spec
 from tradebot.db import repo
 from tradebot.db.models import (
     EquitySnapshot,
@@ -30,7 +31,7 @@ from tradebot.db.models import (
     Portfolio,
     StrategyConfig,
 )
-from tradebot.runner.clock import has_bar
+from tradebot.runner.clock import has_bar, pause_end_bar
 from tradebot.runner.state import PortfolioDef
 
 router = APIRouter(prefix="/portfolios", tags=["portfolios"])
@@ -65,8 +66,17 @@ def kill_switch_out(db: Session, p: Portfolio) -> KillSwitchOut:
     """Read-only kill-switch view (threshold from the stored portfolio config)."""
     assert p.id is not None
     ks = repo.get_kill_switch(db, p.id)
-    threshold = float(json.loads(p.config_json)["engine"]["risk"]["kill_switch_drawdown"])
+    risk = json.loads(p.config_json)["engine"]["risk"]
+    threshold = float(risk["kill_switch_drawdown"])
+    ends: date | None = None
+    if ks and ks.tripped and ks.tripped_at_bar:
+        ends = pause_end_bar(
+            PortfolioDef.from_json(p.config_json).markets(),
+            ks.tripped_at_bar.date(),
+            int(risk.get("kill_switch_pause_bars", 20)),
+        )
     return KillSwitchOut(
+        pause_ends_after_bar=ends,
         tripped=bool(ks and ks.tripped),
         tripped_at_bar=ks.tripped_at_bar if ks else None,
         drawdown_pct=_pct(Decimal(ks.trigger_drawdown)) if ks and ks.trigger_drawdown else None,
@@ -145,7 +155,16 @@ def get_portfolio(db: Db, portfolio_id: int) -> PortfolioDetail:
         and p.kind == "fund"
         and (bench_name is None or b.name == bench_name)
     ]
+    caveats = (
+        [SP500_LABEL]
+        if any(
+            sl.strategy is not None and is_sp500_spec(sl.strategy.id)
+            for sl in PortfolioDef.from_json(p.config_json).sleeves
+        )
+        else []
+    )
     return PortfolioDetail(
+        caveats=caveats,
         **summary.model_dump(),
         sleeves=sleeves,
         kill_switch=kill_switch_out(db, p),

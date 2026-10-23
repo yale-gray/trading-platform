@@ -25,6 +25,8 @@ __all__ = [
     "due_dates",
     "has_bar",
     "market_of",
+    "next_equity_run_after",
+    "pause_end_bar",
 ]
 
 
@@ -77,3 +79,36 @@ def due_dates(
             break  # not complete yet; nothing later can be due either
         d += timedelta(days=1)
     return out
+
+
+def pause_end_bar(markets: Iterable[str], tripped: date, pause_bars: int) -> date | None:
+    """Bar date of the ``pause_bars``-th portfolio bar after trip bar ``tripped`` (the re-arm bar).
+
+    Walks the portfolio's own calendar (a day counts if any of its markets has a bar).
+    ``None`` if the walk leaves the calendar bounds.
+    """
+    mk = sorted(set(markets)) or ["equity"]
+    d, left = tripped, pause_bars
+    try:
+        while left > 0:
+            d += timedelta(days=1)
+            if any(has_bar(m, d) for m in mk):
+                left -= 1
+    except ValueError:
+        return None
+    return d
+
+
+def next_equity_run_after(now: datetime, equity_delay_min: int = 30) -> datetime | None:
+    """UTC instant of the next equity bar completion strictly after ``now`` (close + delay)."""
+    now = now.astimezone(UTC)
+    d = now.date() - timedelta(days=1)
+    try:
+        for _ in range(15):
+            t = bar_complete_time("equity", d, equity_delay_min)
+            if t is not None and t > now:
+                return t
+            d += timedelta(days=1)
+    except ValueError:
+        return None
+    return None

@@ -108,6 +108,7 @@ class KillSwitchOut(BaseModel):
     threshold_pct: float
     acknowledged_at: datetime | None
     note: str | None
+    pause_ends_after_bar: date | None = None
 
 
 class KillSwitchAckIn(BaseModel):
@@ -118,6 +119,7 @@ class PortfolioDetail(PortfolioSummary):
     sleeves: list[SleeveBreakdown]
     kill_switch: KillSwitchOut
     benchmarks: list[PortfolioSummary]
+    caveats: list[str] = Field(default_factory=list)
 
 
 class StrategyCard(BaseModel):
@@ -190,3 +192,4 @@ class RunnerStatus(BaseModel):
     alive: bool
     last_heartbeat: datetime | None
     sleeves: list[SleeveStatus]
+    next_run_after: datetime | None = None

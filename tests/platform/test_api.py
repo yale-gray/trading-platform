@@ -87,6 +87,57 @@ def test_portfolio_list_detail_money_is_a_decimal_string(client: TestClient) -> 
     assert client.get(f"{V1}/portfolios/999").status_code == 404
 
 
+def test_new_status_fields(client: TestClient) -> None:
+    st = client.get(f"{V1}/runner/status").json()
+    nxt = st["next_run_after"]  # SYNTH_NOW is in the past relative to nothing: just a UTC instant
+    assert nxt is not None and nxt.endswith(("Z", "+00:00"))
+    fund = client.get(f"{V1}/portfolios").json()[1]
+    detail = client.get(f"{V1}/portfolios/{fund['id']}").json()
+    assert detail["caveats"] == []
+    ks = detail["kill_switch"]
+    assert ks["tripped"] is True and ks["pause_ends_after_bar"] > ks["tripped_at_bar"][:10]
+
+
+def test_pause_end_bar_and_next_run_calendar() -> None:
+    from datetime import UTC, datetime
+
+    from tradebot.runner.clock import next_equity_run_after, pause_end_bar
+
+    # Fri 2026-10-23 trip, equity only: 1st bar after is Mon 10-26, 3rd is Wed 10-28
+    assert pause_end_bar(["equity"], date(2026, 10, 23), 3) == date(2026, 10, 28)
+    assert pause_end_bar(["crypto", "equity"], date(2026, 10, 23), 3) == date(2026, 10, 26)
+    # Sat 2026-10-24 12:00 UTC -> next completion is Mon 10-26 close 20:00 UTC (EDT) + 30 min
+    assert next_equity_run_after(datetime(2026, 10, 24, 12, tzinfo=UTC)) == datetime(
+        2026, 10, 26, 20, 30, tzinfo=UTC
+    )
+
+
+def test_stocks_sleeve_gets_the_survivorship_caveat(db: Engine) -> None:
+    from tradebot.api.routers.portfolios import get_portfolio
+    from tradebot.data.universe import SP500_LABEL
+
+    class _S:
+        id = "stocks_momentum"
+
+    class _D:
+        sleeves = (type("Sl", (), {"strategy": _S()})(),)
+
+    import tradebot.api.routers.portfolios as mod
+
+    orig = mod.PortfolioDef.from_json
+    mod.PortfolioDef.from_json = staticmethod(lambda _t: _D())  # type: ignore[assignment]
+    try:
+        with session_scope(db) as s:
+            seed(db, [benchmark_definition("SPY", START, data_start=DATA_START)])
+            p = repo.list_portfolios(s)[0]
+            assert p.id is not None
+            # summary path reads config_json only through from_json above plus KS risk json
+            out = get_portfolio(s, p.id)
+        assert out.caveats == [SP500_LABEL]
+    finally:
+        mod.PortfolioDef.from_json = orig  # type: ignore[method-assign]
+
+
 def test_equity_series_has_benchmark_and_filters(client: TestClient) -> None:
     pid = client.get(f"{V1}/portfolios").json()[1]["id"]
     pts = client.get(f"{V1}/portfolios/{pid}/equity").json()

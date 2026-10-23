@@ -68,6 +68,12 @@ Status key: `[ ]` todo · `[~]` in progress · `[x]` done. The PM owns this file
 - [ ] Two $10k portfolios (Smart: 50/40/10; Day trading), dashboard organised into four sections
 - [ ] Then go live: `db init` → create both accounts → `runner start`
 
+## Wave 7: research protocol + Tier A batch (2026-10-23) — ADR A23–A31
+- [x] Day-trading deep research: 5 lead reports + ranked list (`docs/research/dt-deep/`)
+- [x] Tiered costs, protocol gate (trial registry, DSR, Holm, sealed 2024+ hold-out, T-bill edge, SPY overlay), swing account, clock-only lag 0, calendar/FOMC/gap/VWAP/noise operands; audit 008 + fixes
+- [x] Tier A batch (6 pre-registered, 2016–2023): **none advances**; near-misses pre-FOMC (overlay t 2.20) and short-term reversal (survivorship-biased) — `docs/research/tierA-results-2026-10.md`. Trials used: 10 of 12
+- [ ] Owner decision: point-in-time S&P 500 membership / pre-FOMC forward paper test / Tier B with remaining 2 trials
+
 ## Small follow-ups (2026-10-22)
 - [ ] Service reinstall race: `tradebot-service.sh install` on a running service can boot out without bootstrapping; retry after bootout
 - [ ] Fractional-shares audit notes: broker fractional cash-shrink test (N1), engine-level off-grid fill test (N2), sandbox help text still says "whole shares"

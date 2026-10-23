@@ -8,6 +8,7 @@
     "sharpe_annual": -2.31,
     "n_obs": null,
     "batch": "daytrading-round1",
+    "protocol": false,
     "notes": "5 bps run; annual Sharpe from docs/research/daytrading-2026-10.md; per-period = annual/sqrt(252) (approximation; source was 15m bars)"
   },
   {
@@ -19,6 +20,7 @@
     "sharpe_annual": -2.87,
     "n_obs": null,
     "batch": "daytrading-round1",
+    "protocol": false,
     "notes": "5 bps run; annual Sharpe from docs/research/daytrading-2026-10.md; per-period = annual/sqrt(252) (approximation; source was 15m bars)"
   },
   {
@@ -30,6 +32,7 @@
     "sharpe_annual": -4.08,
     "n_obs": null,
     "batch": "daytrading-round2",
+    "protocol": false,
     "notes": "5 bps run; annual Sharpe from docs/research/daytrading-round2-2026-10.md; per-period = annual/sqrt(252) (approximation; source was 15m bars)"
   },
   {
@@ -41,6 +44,79 @@
     "sharpe_annual": -1.52,
     "n_obs": null,
     "batch": "daytrading-round2",
+    "protocol": false,
     "notes": "5 bps run; annual Sharpe from docs/research/daytrading-round2-2026-10.md; per-period = annual/sqrt(252) (approximation; source was 15m bars)"
+  },
+  {
+    "id": "tA_st_reversal",
+    "commit": "774b2bd",
+    "date": "2026-10-23",
+    "status": "failed",
+    "sharpe_period": 0.059047320949104934,
+    "sharpe_annual": 0.9373471608956763,
+    "n_obs": 1972,
+    "batch": "tierA-2026-10",
+    "protocol": true,
+    "notes": " Measured after fixes deff99f (A31)."
+  },
+  {
+    "id": "tA_overnight",
+    "commit": "774b2bd",
+    "date": "2026-10-23",
+    "status": "failed",
+    "sharpe_period": 0.014041881365542463,
+    "sharpe_annual": 0.2229079561961845,
+    "n_obs": 1972,
+    "batch": "tierA-2026-10",
+    "protocol": true,
+    "notes": " Measured after fixes deff99f (A31)."
+  },
+  {
+    "id": "tA_noise_momentum",
+    "commit": "774b2bd",
+    "date": "2026-10-23",
+    "status": "failed",
+    "sharpe_period": -0.0103818922180886,
+    "sharpe_annual": -0.1648074296840351,
+    "n_obs": 1972,
+    "batch": "tierA-2026-10",
+    "protocol": true,
+    "notes": " Measured after fixes deff99f (A31)."
+  },
+  {
+    "id": "tA_gap_reversal",
+    "commit": "774b2bd",
+    "date": "2026-10-23",
+    "status": "failed",
+    "sharpe_period": -0.014969590229084773,
+    "sharpe_annual": -0.23763487784820436,
+    "n_obs": 1972,
+    "batch": "tierA-2026-10",
+    "protocol": true,
+    "notes": " Measured after fixes deff99f (A31)."
+  },
+  {
+    "id": "tA_turn_of_month",
+    "commit": "774b2bd",
+    "date": "2026-10-23",
+    "status": "failed",
+    "sharpe_period": 0.0332729698892657,
+    "sharpe_annual": 0.5281920222452243,
+    "n_obs": 1972,
+    "batch": "tierA-2026-10",
+    "protocol": true,
+    "notes": " Measured after fixes deff99f (A31)."
+  },
+  {
+    "id": "tA_pre_fomc",
+    "commit": "774b2bd",
+    "date": "2026-10-23",
+    "status": "failed",
+    "sharpe_period": 0.047197190716783195,
+    "sharpe_annual": 0.749232175304968,
+    "n_obs": 1972,
+    "batch": "tierA-2026-10",
+    "protocol": true,
+    "notes": " Measured after fixes deff99f (A31)."
   }
 ]

@@ -63,8 +63,8 @@ Status key: `[ ]` todo · `[~]` in progress · `[x]` done. The PM owns this file
 - [x] Index rework: 4 pre-registered candidates all failed the gate → index section = SPY/QQQ buy-and-hold (A17; `docs/research/index-strategies-2026-10.md`)
 - [x] S&P 500 stocks: 501 symbols cached, class shares (BRK.B), `stocks_momentum` 22.1%/yr vs SPY 10.9% but **survivorship-biased** and fails the gate on drawdown (`docs/research/sp500-stocks-2026-10.md`)
 - [x] Kill switch pause-and-re-arm (A18); smart $10k preset (`--preset smart`, 50/40/10); dashboard Index/Stocks/Crypto sections
-- [ ] Intraday: Alpaca 15-minute bars, intraday calendar, flatten-before-close, PDT/settlement constraint, runner ticking every 15 min during market hours
-- [ ] Day-trading strategies: "buy sharp dips" + "ride breakouts", tested side by side through the gate
+- [x] Intraday: Alpaca 15-minute bars, intraday calendar, flatten-before-close, PDT/settlement constraint, runner ticking every 15 min during market hours
+- [x] Day-trading strategies: "buy sharp dips" + "ride breakouts", tested side by side through the gate. **Both fail** on 10.6y of real 15m data (about −19%/yr vs SPY +15%/yr; costs swamp a tiny or absent edge). The account is not started (`docs/research/daytrading-2026-10.md`)
 - [ ] Two $10k portfolios (Smart: 50/40/10; Day trading), dashboard organised into four sections
 - [ ] Then go live: `db init` → create both accounts → `runner start`
 

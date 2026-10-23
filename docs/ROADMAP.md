@@ -68,6 +68,11 @@ Status key: `[ ]` todo · `[~]` in progress · `[x]` done. The PM owns this file
 - [ ] Two $10k portfolios (Smart: 50/40/10; Day trading), dashboard organised into four sections
 - [ ] Then go live: `db init` → create both accounts → `runner start`
 
+## Small follow-ups (2026-10-22)
+- [ ] Service reinstall race: `tradebot-service.sh install` on a running service can boot out without bootstrapping; retry after bootout
+- [ ] Fractional-shares audit notes: broker fractional cash-shrink test (N1), engine-level off-grid fill test (N2), sandbox help text still says "whole shares"
+- [ ] Checkpoint growth; Learn page static "about 20 trading days" copy
+
 ## Phase 6: AI and templates (later)
 - [ ] Claude plain-English → strategy schema builder
 - [ ] Template library, fork/clone, alerts

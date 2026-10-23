@@ -441,6 +441,7 @@ def run_scenario(scn: Scenario, *, check: bool, restore: bool) -> Trace:
 # ---------------------------------------------------------------------------- properties
 
 
+@pytest.mark.slow
 @settings(max_examples=40)
 @given(scn=scenarios(min_bars=25, max_bars=60))
 def test_invariants_i1_to_i18_and_restore_equivalence(scn: Scenario) -> None:
@@ -460,6 +461,7 @@ def test_two_identical_runs_are_byte_identical(scn: Scenario) -> None:
     assert a.final_state == b.final_state and a.lines == b.lines
 
 
+@pytest.mark.slow
 def test_hash_seed_independence() -> None:
     """I15 / G8: ``export_state`` is identical under different ``PYTHONHASHSEED`` values."""
     code = (

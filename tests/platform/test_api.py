@@ -353,6 +353,7 @@ def test_backtest_rejects_bad_override_values(client: TestClient) -> None:
     assert post_name("") == 422
 
 
+@pytest.mark.slow
 def test_backtest_accepts_valid_overrides_and_refuses_end_after_last_closed_bar(
     client: TestClient,
 ) -> None:

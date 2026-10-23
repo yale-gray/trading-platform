@@ -389,6 +389,7 @@ class PortfolioEngine:
         *,
         session_end: bool = False,
         lean: bool = False,
+        late_flatten: bool = False,
     ) -> BarResult:
         """Run steps A-F for bar ``asof``. Raises ``StaleBarError`` if ``asof`` does not advance.
 
@@ -396,9 +397,12 @@ class PortfolioEngine:
         is sold at this bar's close (after step B). ``lean``: only held and pending symbols are
         converted and marked from ``bars`` (a mapping only probed with ``in`` / ``[]``); targeted
         symbols are pulled by ``submit_target_weights``. Both default to the daily behaviour.
+        ``late_flatten``: an earlier session's positions are still open (its last bar never came):
+        with ``intraday_flatten`` they are sold at this bar's open before anything else
+        (:meth:`flatten_late`, flagged ``FLATTEN_LATE``).
         """
         with money_context():
-            return self._process_bar(asof, bars, session_end, lean)
+            return self._process_bar(asof, bars, session_end, lean, late_flatten)
 
     def _lean_bars(self, bars: Mapping[str, Bar]) -> dict[str, Bar]:
         """The bars of held and pending-order symbols (the only ones step A-D can touch)."""
@@ -433,7 +437,12 @@ class PortfolioEngine:
             self._fresh.add(sym)
 
     def _process_bar(
-        self, asof: AsOf, bars: Mapping[str, Bar], session_end: bool, lean: bool
+        self,
+        asof: AsOf,
+        bars: Mapping[str, Bar],
+        session_end: bool,
+        lean: bool,
+        late_flatten: bool = False,
     ) -> BarResult:
         if self._last_asof is not None and asof <= self._last_asof:
             raise StaleBarError(f"asof {asof} is not after last processed {self._last_asof}")
@@ -459,6 +468,12 @@ class PortfolioEngine:
             atrs[sym] = None if a is None else to_ratio(a, PRICE_Q)
 
         n_before = len(self._ledger)
+        late_fills: list[Order] = []
+        late_rejected: list[Order] = []
+        late_cancelled: list[Order] = []
+        if late_flatten and self._config.intraday_flatten:
+            lr = self.flatten_late(asof, bars)
+            late_fills, late_rejected, late_cancelled = lr.fills, lr.rejected, lr.expired
         # A: fills at the open.
         fill_result: FillResult = self._broker.process_bar(asof, bars)
         # B: mark at the close (symbols without a bar keep their last close).
@@ -535,25 +550,55 @@ class PortfolioEngine:
             snap = self._make_snapshot(asof)
         return BarResult(
             asof=asof,
-            fills=fill_result.fills + flat_fills,
+            fills=late_fills + fill_result.fills + flat_fills,
             stop_orders=stop_orders,
             expired=fill_result.expired,
             new_ledger_events=list(self._ledger.events[n_before:]),
             snapshot=snap,
             kill_switch_tripped=obs.tripped_now,
             rebalance_planned=planned,
-            rejected=fill_result.rejected + flat_rejected,
-            cancelled=cancelled + flat_cancelled,
+            rejected=late_rejected + fill_result.rejected + flat_rejected,
+            cancelled=late_cancelled + cancelled + flat_cancelled,
         )
 
     def _flatten(self, asof: AsOf, prev_asof: AsOf | None) -> FillResult:
-        """Sell every position at this bar's close (a symbol without a bar uses its last close)."""
+        """Sell every position at this bar's close.
+
+        A symbol without a bar on this bar is still sold, at its last close with
+        ``FLATTEN_NO_BAR_EXTRA_BPS`` of extra slippage and a ``FLATTEN_NO_BAR`` flag (M2).
+        """
         held = sorted({sym for book in self._ledger.state_view.positions.values() for sym in book})
         if not held and not self._broker.pending_orders:
             return FillResult(asof=asof, fills=[], rejected=[], expired=[], new_ledger_events=[])
         submitted = prev_asof if prev_asof is not None else asof - timedelta(seconds=1)  # type: ignore[operator]
         closes = {sym: self._last_close[sym] for sym in held}
-        return self._broker.flatten_at_close(asof, closes, submitted)
+        no_bar = [sym for sym in held if sym not in self._fresh]
+        return self._broker.flatten_at_close(asof, closes, submitted, no_bar=no_bar)
+
+    def flatten_late(self, asof: AsOf, bars: Mapping[str, Bar]) -> FillResult:
+        """Next-session flatten after a missing last bar (audit 007 m7).
+
+        Called by the driver *before* ``process_bar`` of the first bar of a later session while
+        positions or orders are still open from an earlier one: cancels pending orders and sells
+        every position at this bar's open (minus sell slippage), flagged ``FLATTEN_LATE``. A held
+        symbol without a bar here is sold at its last close with the ``FLATTEN_NO_BAR`` haircut.
+        """
+        if self._last_asof is None or asof <= self._last_asof:
+            raise StaleBarError(f"asof {asof} is not after last processed {self._last_asof}")
+        held = sorted({sym for book in self._ledger.state_view.positions.values() for sym in book})
+        if not held and not self._broker.pending_orders:
+            return FillResult(asof=asof, fills=[], rejected=[], expired=[], new_ledger_events=[])
+        prices: dict[str, Decimal] = {}
+        no_bar: list[str] = []
+        for sym in held:
+            if sym in bars:
+                prices[sym] = to_price(bars[sym].open)
+            else:
+                prices[sym] = self._last_close[sym]
+                no_bar.append(sym)
+        return self._broker.flatten_at_close(
+            asof, prices, self._last_asof, no_bar=no_bar, stage=Stage.OPEN_FILL, late=True
+        )
 
     def _step_stops(
         self, asof: AsOf, closes: Mapping[str, Decimal], atrs: Mapping[str, Decimal | None]

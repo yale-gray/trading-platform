@@ -21,7 +21,7 @@ from sqlmodel import Session, SQLModel
 from tradebot.db import models as _models  # noqa: F401  (registers the tables)
 from tradebot.db.models import SCHEMA_VERSION, SchemaVersion
 
-__all__ = ["create_all", "make_engine", "migrate_asof", "session_scope"]
+__all__ = ["create_all", "make_engine", "migrate_asof", "migrate_unsettled", "session_scope"]
 
 
 def make_engine(db_path: str | Path, *, echo: bool = False) -> Engine:
@@ -63,6 +63,7 @@ def create_all(engine: Engine) -> None:
     """
     SQLModel.metadata.create_all(engine)
     migrate_asof(engine)
+    migrate_unsettled(engine)
     with session_scope(engine) as session:
         row = session.get(SchemaVersion, 1)
         if row is None:
@@ -120,6 +121,21 @@ def migrate_asof(engine: Engine) -> int:
                     )
                     fixed += 1
     return fixed
+
+
+def migrate_unsettled(engine: Engine) -> bool:
+    """Add the nullable ``equity_snapshot.unsettled`` column to a DB created before it existed.
+
+    Old rows keep NULL ("not recorded"). Idempotent: does nothing when the column is there.
+    Returns True if the column was added.
+    """
+    with session_scope(engine) as session:
+        conn = session.connection()
+        cols = {row[1] for row in conn.exec_driver_sql('PRAGMA table_info("equity_snapshot")')}
+        if not cols or "unsettled" in cols:
+            return False
+        conn.exec_driver_sql('ALTER TABLE "equity_snapshot" ADD COLUMN "unsettled" TEXT')
+    return True
 
 
 @contextmanager

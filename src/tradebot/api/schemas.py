@@ -77,6 +77,42 @@ class Page[T](BaseModel):
     offset: int
 
 
+class RoundTripOut(BaseModel):
+    """One completed buy-then-sell of a symbol in a sleeve (from the ledger)."""
+
+    sleeve_key: str
+    symbol: str
+    entry_ts: datetime
+    exit_ts: datetime
+    qty: Money
+    entry_price: Money
+    exit_price: Money
+    fees: Money
+    pnl: Money  # after fees
+    pnl_pct: float  # pnl / (qty * entry_price), in percent
+    exit_reason: Literal["signal", "stop", "rebalance", "manual", "flatten", "flatten_no_bar"]
+
+
+class RoundTripPage(BaseModel):
+    items: list[RoundTripOut]  # newest exit first
+    total: int  # round trips matching the filter (before `limit`)
+    limit: int
+    win_rate: float | None  # share of matching round trips with pnl > 0, 0..1
+    total_pnl: Money
+
+
+class DailyOut(BaseModel):
+    """One New York trading session of a portfolio versus its benchmark."""
+
+    date: date
+    start_equity: Money
+    end_equity: Money
+    pnl: Money
+    pnl_pct: float
+    n_roundtrips: int
+    benchmark_pnl_pct: float | None  # None when the benchmark has no snapshot for the session
+
+
 class OrderOut(BaseModel):
     order_id: str
     sleeve_key: str
@@ -116,6 +152,10 @@ class KillSwitchAckIn(BaseModel):
 
 
 class PortfolioDetail(PortfolioSummary):
+    cash: Money  # all cash, settled or not
+    unsettled_cash: Money  # sale money arriving at the next session (T+1 accounts; else 0)
+    settled_cash: Money  # cash - unsettled_cash: what can fund a buy right now
+    as_of: datetime | None = None  # bar the cash figures belong to (None before the first bar)
     sleeves: list[SleeveBreakdown]
     kill_switch: KillSwitchOut
     benchmarks: list[PortfolioSummary]

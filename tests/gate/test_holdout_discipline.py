@@ -150,6 +150,7 @@ def test_split_is_by_date_and_fixed_before_tuning(market, cfg) -> None:  # type:
     assert split_oos(cal[:-100])[1][0] != oos_idx[0]
 
 
+@pytest.mark.slow
 def test_oos_needs_a_frozen_config_and_is_read_once_per_hash(market, cfg) -> None:  # type: ignore[no-untyped-def]
     cut = cut_of(cfg, market)
     reg = OosRegistry()

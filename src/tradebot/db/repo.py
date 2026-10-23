@@ -324,6 +324,7 @@ def write_snapshots(
             cash=to_text(snap.cash),
             drawdown=to_text(snap.drawdown),
             benchmark_equity=_opt(benchmark_equity),
+            unsettled=to_text(snap.unsettled),
         )
     )
     for sl in snap.sleeves:
@@ -335,6 +336,7 @@ def write_snapshots(
                 ts=ts,
                 equity=to_text(sl.equity),
                 cash=to_text(sl.cash),
+                unsettled=to_text(sl.unsettled),
             )
         )
         for p in sl.positions:

@@ -82,12 +82,15 @@ def _cfg(spec: RulesSpec, start: date, end: date, **kw: bool) -> BacktestConfig:
         start=start,
         end=end,
         engine=_engine_cfg(**kw),
+        decision_lag_bars=0,  # these tests pin exact fills; lag behaviour has its own tests
     )
 
 
 def _run_driver(cfg: BacktestConfig, bars: dict[str, pd.DataFrame]):  # noqa: ANN202
     engine = PortfolioEngine(build_engine_config(cfg.engine, cfg.sleeves))
-    driver = BarDriver(engine, cfg.sleeves, bars, start=cfg.start)
+    driver = BarDriver(
+        engine, cfg.sleeves, bars, start=cfg.start, decision_lag_bars=cfg.decision_lag_bars
+    )
     steps = list(driver.run(end=cfg.end))
     return engine, driver, steps
 

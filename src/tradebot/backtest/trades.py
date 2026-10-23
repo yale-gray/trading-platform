@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict
 from tradebot.portfolio.asof import AsOf, asof_timestamp
 from tradebot.portfolio.models import EventType, FillSide, LedgerEvent, PortfolioSnapshot
 from tradebot.portfolio.money import PRICE_Q, money_context
-from tradebot.sim.orders import Order, OrderOrigin
+from tradebot.sim.orders import Order, OrderOrigin, OrderReason
 
 __all__ = [
     "ClosedTrade",
@@ -29,7 +29,7 @@ __all__ = [
     "open_positions",
 ]
 
-ExitReason = Literal["signal", "stop", "rebalance", "manual", "flatten"]
+ExitReason = Literal["signal", "stop", "rebalance", "manual", "flatten", "flatten_no_bar"]
 
 _EXIT_REASONS: dict[OrderOrigin, ExitReason] = {
     OrderOrigin.STRATEGY: "signal",
@@ -69,8 +69,13 @@ class OpenPosition(BaseModel):
     mv: Decimal
 
 
-def exit_reason_for(origin: OrderOrigin) -> ExitReason:
-    """Map the origin of a closing SELL order to an ``exit_reason``."""
+def exit_reason_for(origin: OrderOrigin, reason: OrderReason | None = None) -> ExitReason:
+    """Map the origin (and reason) of a closing SELL order to an ``exit_reason``.
+
+    A flatten sold without a bar (extra haircut, audit 007 M2) is ``flatten_no_bar``.
+    """
+    if origin is OrderOrigin.FLATTEN and reason is OrderReason.FLATTEN_NO_BAR:
+        return "flatten_no_bar"
     return _EXIT_REASONS[origin]
 
 
@@ -159,7 +164,7 @@ def closed_trades(ledger: Sequence[LedgerEvent], orders: Mapping[str, Order]) ->
                     exit_price=_avg(trip.sell_value, trip.sold),
                     fees=fees,
                     net_pnl=trip.pnl - fees,
-                    exit_reason=exit_reason_for(order.origin),
+                    exit_reason=exit_reason_for(order.origin, order.reason),
                 )
                 out.append((ev.asof, ev.sleeve_id, ev.symbol, ev.seq, trade))
     out.sort(key=lambda t: t[:4])

@@ -6,12 +6,14 @@ import json
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import Session, col, func, select
 
 from tradebot.api.deps import Db
 from tradebot.api.schemas import (
+    DailyOut,
     EquityPoint,
     KillSwitchOut,
     OrderOut,
@@ -19,9 +21,12 @@ from tradebot.api.schemas import (
     PortfolioDetail,
     PortfolioSummary,
     PositionOut,
+    RoundTripOut,
+    RoundTripPage,
     SleeveBreakdown,
     TradeOut,
 )
+from tradebot.backtest.trades import ClosedTrade, closed_trades
 from tradebot.data.universe import SP500_LABEL, is_sp500_spec
 from tradebot.db import repo
 from tradebot.db.models import (
@@ -33,6 +38,7 @@ from tradebot.db.models import (
 )
 from tradebot.runner.clock import has_bar, pause_end_bar, pause_end_bar_15m
 from tradebot.runner.state import PortfolioDef
+from tradebot.sim.orders import Order
 
 router = APIRouter(prefix="/portfolios", tags=["portfolios"])
 
@@ -167,13 +173,44 @@ def get_portfolio(db: Db, portfolio_id: int) -> PortfolioDetail:
         )
         else []
     )
+    cash, unsettled, as_of = _cash_figures(db, p)
     return PortfolioDetail(
         caveats=caveats,
         **summary.model_dump(),
+        cash=cash,
+        unsettled_cash=unsettled,
+        settled_cash=cash - unsettled,
+        as_of=as_of,
         sleeves=sleeves,
         kill_switch=kill_switch_out(db, p),
         benchmarks=benchmarks,
     )
+
+
+def _cash_figures(db: Session, p: Portfolio) -> tuple[Decimal, Decimal, datetime | None]:
+    """``(cash, unsettled, bar ts)`` at the latest total snapshot.
+
+    ``unsettled`` is stored per snapshot; a row written before that column existed (NULL) of a
+    T+1 portfolio is recomputed from the ledger by restoring the engine. Before the first bar:
+    the initial cash, nothing unsettled.
+    """
+    assert p.id is not None
+    rows = _total_rows(db, p.id)
+    if not rows:
+        return Decimal(p.initial_cash), ZERO, None
+    last = rows[-1]
+    cash = Decimal(last.cash)
+    if last.unsettled is not None:
+        return cash, Decimal(last.unsettled), last.ts
+    if PortfolioDef.from_json(p.config_json).engine_config().settlement == "none":
+        return cash, ZERO, last.ts
+    from tradebot.runner.bootstrap import restore_context  # lazy: heavy, rarely needed
+
+    try:
+        snap = restore_context(db, p).engine.snapshot()
+    except Exception:  # noqa: BLE001 - a display figure must not break the page
+        return cash, ZERO, last.ts
+    return cash, snap.unsettled, last.ts
 
 
 def _as_datetime(asof: date | datetime) -> datetime:
@@ -357,3 +394,136 @@ def get_orders(db: Db, portfolio_id: int, status: str | None = None) -> list[Ord
         )
         for o in db.exec(stmt.order_by(col(OrderRow.id)))
     ]
+
+
+def _closed_trades(db: Session, pid: int) -> list[ClosedTrade]:
+    """Round trips of the whole persisted ledger (the same pairing the backtester uses)."""
+    orders = {
+        o.order_id: Order.model_validate_json(o.order_json)
+        for o in db.exec(select(OrderRow).where(OrderRow.portfolio_id == pid))
+    }
+    return closed_trades(repo.ledger_events(db, pid), orders)
+
+
+@router.get("/{portfolio_id}/roundtrips", response_model=RoundTripPage)
+def get_roundtrips(
+    db: Db,
+    portfolio_id: int,
+    from_: Annotated[str | None, Query(alias="from")] = None,
+    to: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    sleeve: str | None = None,
+) -> RoundTripPage:
+    """Completed round trips (entry to exit), newest exit first, with win rate and total P&L.
+
+    ``from``/``to`` filter on the exit time (a date, with ``to`` covering the whole day, or a UTC
+    timestamp). ``exit_reason`` is ``signal``, ``stop``, ``flatten`` (end-of-day exit) or
+    ``flatten_no_bar`` (end-of-day exit of a symbol with no price bar; sold with an extra haircut).
+    """
+    p = require_portfolio(db, portfolio_id)
+    assert p.id is not None
+    lo = _bound(from_)[0] if from_ is not None else None
+    hi: datetime | None = None
+    whole_day = False
+    if to is not None:
+        hi, whole_day = _bound(to)
+    rows: list[tuple[datetime, datetime, ClosedTrade]] = []
+    for t in _closed_trades(db, p.id):
+        entry, exit_ = _as_datetime(t.entry_asof), _as_datetime(t.exit_asof)
+        exit_naive = exit_.astimezone(UTC).replace(tzinfo=None) if exit_.tzinfo else exit_
+        if sleeve is not None and t.sleeve_id != sleeve:
+            continue
+        if lo is not None and exit_naive < lo:
+            continue
+        if hi is not None and (
+            exit_naive >= hi + timedelta(days=1) if whole_day else exit_naive > hi
+        ):
+            continue
+        rows.append((entry, exit_, t))
+    rows.sort(key=lambda r: (r[1], r[2].sleeve_id, r[2].symbol), reverse=True)
+    wins = sum(1 for _, _, t in rows if t.net_pnl > 0)
+    total_pnl = sum((t.net_pnl for _, _, t in rows), ZERO)
+    items = [
+        RoundTripOut(
+            sleeve_key=t.sleeve_id,
+            symbol=t.symbol,
+            entry_ts=entry,
+            exit_ts=exit_,
+            qty=t.qty,
+            entry_price=t.entry_price,
+            exit_price=t.exit_price,
+            fees=t.fees,
+            pnl=t.net_pnl,
+            pnl_pct=_pct(t.net_pnl / (t.qty * t.entry_price)) if t.qty * t.entry_price else 0.0,
+            exit_reason=t.exit_reason,
+        )
+        for entry, exit_, t in rows[:limit]
+    ]
+    return RoundTripPage(
+        items=items,
+        total=len(rows),
+        limit=limit,
+        win_rate=wins / len(rows) if rows else None,
+        total_pnl=total_pnl,
+    )
+
+
+_NY = ZoneInfo("America/New_York")
+
+
+@router.get("/{portfolio_id}/daily", response_model=list[DailyOut])
+def get_daily(
+    db: Db,
+    portfolio_id: int,
+    from_: Annotated[str | None, Query(alias="from")] = None,
+    to: str | None = None,
+) -> list[DailyOut]:
+    """Per-session P&L (oldest first): the portfolio's and its benchmark's, in percent.
+
+    A session's start equity is the previous session's end equity (the initial cash for the
+    first one). Sessions are New York dates for 15m portfolios and bar dates for daily ones.
+    """
+    p = require_portfolio(db, portfolio_id)
+    assert p.id is not None
+    intraday = PortfolioDef.from_json(p.config_json).timeframe() == "15m"
+
+    def session_of(ts: datetime) -> date:
+        if not intraday:
+            return ts.date()
+        return (ts if ts.tzinfo else ts.replace(tzinfo=UTC)).astimezone(_NY).date()
+
+    last_eq: dict[date, Decimal] = {}
+    last_bench: dict[date, Decimal | None] = {}
+    for r in _total_rows(db, p.id):  # ascending ts, so the last write per session wins
+        d = session_of(r.ts)
+        last_eq[d] = Decimal(r.equity)
+        last_bench[d] = Decimal(r.benchmark_equity) if r.benchmark_equity else None
+    trips: dict[date, int] = {}
+    for t in _closed_trades(db, p.id):
+        d = session_of(_as_datetime(t.exit_asof))
+        trips[d] = trips.get(d, 0) + 1
+    initial = Decimal(p.initial_cash)
+    prev_eq, prev_bench = initial, initial  # a benchmark starts with the same capital
+    lo = _bound(from_)[0].date() if from_ is not None else None
+    hi = _bound(to)[0].date() if to is not None else None
+    out: list[DailyOut] = []
+    for d in sorted(last_eq):
+        end, bench = last_eq[d], last_bench[d]
+        if (lo is None or d >= lo) and (hi is None or d <= hi):
+            out.append(
+                DailyOut(
+                    date=d,
+                    start_equity=prev_eq,
+                    end_equity=end,
+                    pnl=end - prev_eq,
+                    pnl_pct=_pct(end / prev_eq - 1) if prev_eq else 0.0,
+                    n_roundtrips=trips.get(d, 0),
+                    benchmark_pnl_pct=(
+                        _pct(bench / prev_bench - 1) if bench is not None and prev_bench else None
+                    ),
+                )
+            )
+        prev_eq = end
+        if bench is not None:
+            prev_bench = bench
+    return out

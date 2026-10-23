@@ -386,6 +386,7 @@ class CliData(FakeIntradayData):
         return super().get_bars_many(symbols, start, end, **kw)
 
 
+@pytest.mark.slow
 def test_cli_end_to_end_daytrading_ticks_and_flattens_at_the_close(
     cli_db: Engine, monkeypatch: pytest.MonkeyPatch, capsys: Any
 ) -> None:

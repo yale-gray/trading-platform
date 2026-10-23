@@ -90,6 +90,8 @@ class OrderReason(StrEnum):
     BELOW_MIN_SIZE = "BELOW_MIN_SIZE"
     SHRUNK_CASH = "SHRUNK_CASH"
     INSUFFICIENT_CASH = "INSUFFICIENT_CASH"
+    FLATTEN_NO_BAR = "FLATTEN_NO_BAR"  # flatten sell of a symbol that had no bar (extra haircut)
+    FLATTEN_LATE = "FLATTEN_LATE"  # flatten at a later session's open (the last bar never came)
 
 
 class OrderRequest(BaseModel):

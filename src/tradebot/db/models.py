@@ -268,6 +268,7 @@ class EquitySnapshot(SQLModel, table=True):
     cash: str
     drawdown: str | None = None
     benchmark_equity: str | None = None
+    unsettled: str | None = None  # sale money not yet spendable (T+1); NULL on rows before A21
 
 
 class EngineCheckpoint(SQLModel, table=True):

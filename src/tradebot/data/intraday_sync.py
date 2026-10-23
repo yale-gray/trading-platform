@@ -2,9 +2,9 @@
 
 Cache layout: source key ``alpaca/15m`` (``<cache>/alpaca/15m/<SYMBOL>/gen-NNNN/...``), holding
 **SIP** bars adjusted for splits and dividends as of the fetch date. IEX bars are never written
-to the cache: the optional live tail is fetched on read and returned only in memory, because
-IEX prices and volumes differ from the consolidated tape and splicing them into one stored
-series would corrupt the overlap/restatement checks.
+to the cache: the optional live tail (off by default, ADR-0001 A22) is fetched on read and
+returned only in memory, because IEX prices and volumes differ from the consolidated tape and
+splicing them into one stored series would corrupt the overlap/restatement checks.
 
 Dates passed around here are New York session dates (inclusive). Time comes from the
 injected ``Clock`` only.
@@ -120,8 +120,9 @@ class IntradaySync:
     ) -> tuple[dict[Symbol, QualityReport], dict[Symbol, DataError]]:
         """Refresh each symbol's tail (and head if ``req_start`` precedes the cache).
 
-        Errors are isolated per symbol. Symbols are fetched ``intraday_chunk_symbols`` at a
-        time (multi-symbol requests) so memory stays bounded for the full S&P 500.
+        Errors are isolated per symbol. Symbols are fetched in multi-symbol groups: up to
+        ``intraday_tail_chunk_symbols`` (100) for short tail plans, ``intraday_chunk_symbols`` for
+        bulk history, so memory stays bounded and a 500-symbol tick is a handful of requests.
         """
         reports: dict[Symbol, QualityReport] = {}
         errors: dict[Symbol, DataError] = {}
@@ -152,10 +153,7 @@ class IntradaySync:
                 fail(symbol, exc)
 
         provider = self.history()
-        ordered = sorted(plans, key=lambda s: plans[s])
-        size = max(1, self._config.intraday_chunk_symbols)
-        for i in range(0, len(ordered), size):
-            group = ordered[i : i + size]
+        for group in self._groups(plans):
             lo = min(plans[s][0] for s in group)
             hi = max(plans[s][1] for s in group)
             try:
@@ -182,6 +180,22 @@ class IntradaySync:
                 except DataError as exc:
                     fail(symbol, exc)
         return reports, errors
+
+    def _groups(self, plans: dict[Symbol, tuple[date, date]]) -> list[list[Symbol]]:
+        """Request groups: short tail plans in big batches, bulk history in small ones."""
+        cfg = self._config
+        span = timedelta(days=cfg.intraday_tail_max_days)
+        tails = sorted((s for s, (a, b) in plans.items() if b - a <= span), key=plans.__getitem__)
+        done = set(tails)
+        bulk = sorted((s for s in plans if s not in done), key=plans.__getitem__)
+        out: list[list[Symbol]] = []
+        for names, size in (
+            (tails, cfg.intraday_tail_chunk_symbols),
+            (bulk, cfg.intraday_chunk_symbols),
+        ):
+            size = max(1, size)
+            out.extend(names[i : i + size] for i in range(0, len(names), size))
+        return out
 
     def _cached_len(self, symbol: Symbol) -> int:
         try:

@@ -481,10 +481,12 @@ class MarketData:
     ) -> dict[Symbol, pd.DataFrame]:
         """15m bars with New York session date in ``[start, end]`` (A21).
 
-        History comes from the SIP cache; the not-yet-cached last few bars come from the
-        live (IEX) provider, in memory only. ``require_fresh`` tolerates 4 missing bars.
+        History comes from the SIP cache. Only if ``intraday_live_feed`` is set (off by default,
+        A22) are the not-yet-cached last bars added from that live provider, in memory only.
+        ``require_fresh`` tolerates 4 missing bars.
         """
         online = refresh and not self._offline and generation is None
+        tail = online and self._intraday.live() is not None  # IEX tail is off by default (A22)
         if online:
             _, errors = self._intraday.refresh(canon, start)
             if errors:  # every symbol was attempted; surface the first failure
@@ -495,13 +497,13 @@ class MarketData:
                 out[symbol] = _empty_bars()
                 continue
             frame = self._intraday.read(symbol, start, end)
-            if online:
+            if tail:
                 frame = self._intraday.with_live_tail(symbol, frame, start, end)
             if require_fresh:
                 latest = self._intraday.read(symbol, None, None)
-                if online:
+                if tail:
                     latest = self._intraday.with_live_tail(symbol, latest, start, end)
-                self._intraday.check_fresh(symbol, latest, live=online)
+                self._intraday.check_fresh(symbol, latest, live=tail)
             out[symbol] = frame
         return out
 

@@ -9,7 +9,7 @@ a wall clock; the only float-to-Decimal conversion is :func:`to_price`.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Protocol
@@ -36,6 +36,8 @@ from tradebot.sim.orders import (
 )
 
 _BPS = Decimal(10000)
+# Extra sell slippage on a flatten of a symbol that had no bar (audit 007 M2).
+FLATTEN_NO_BAR_EXTRA_BPS = Decimal(50)
 
 
 class StaleBarError(ValueError):
@@ -283,7 +285,14 @@ class SimBroker:
         self._last_close[symbol] = close
 
     def flatten_at_close(
-        self, asof: AsOf, closes: Mapping[str, Decimal], submitted: AsOf | None = None
+        self,
+        asof: AsOf,
+        closes: Mapping[str, Decimal],
+        submitted: AsOf | None = None,
+        *,
+        no_bar: Collection[str] = (),
+        stage: Stage = Stage.CLOSE,
+        late: bool = False,
     ) -> FillResult:
         """End-of-session exit (ADR-0001 A21): cancel every pending order, sell every position.
 
@@ -291,6 +300,12 @@ class SimBroker:
         market-on-close order that was queued before the bar; ``submitted`` (default one
         second before ``asof``) is its creation stamp so ``fill_asof > created_asof`` (I8) holds.
         ``closes`` must cover every held symbol. Orders carry ``OrderOrigin.FLATTEN``.
+
+        ``no_bar`` names held symbols that had no bar: they are sold at the price given for them
+        (their last close) with ``FLATTEN_NO_BAR_EXTRA_BPS`` of extra slippage, and the order
+        reason and the FILL metadata flag say so (audit 007 M2). ``late`` (with
+        ``stage=Stage.OPEN_FILL``) is the next-session open flatten after a missing last bar:
+        every fill is flagged ``FLATTEN_LATE``.
         """
         stamp = submitted if submitted is not None else asof - timedelta(seconds=1)  # type: ignore[operator]
         cancelled = [self.cancel_order(o.order_id) for o in self.pending_orders]
@@ -302,11 +317,29 @@ class SimBroker:
             for sid in sorted(state.positions)
             for sym, pos in sorted(state.positions[sid].items())
         ]
+        missing = set(no_bar)
         fills: list[Order] = []
         rejected: list[Order] = []
         events: list[LedgerEvent] = []
         for order in self.submit_orders(reqs, stamp):
-            done, evs = self._fill(order, asof, closes[order.symbol], Stage.CLOSE)
+            flags = (["FLATTEN_LATE"] if late else []) + (
+                ["FLATTEN_NO_BAR"] if order.symbol in missing else []
+            )
+            done, evs = self._fill(
+                order,
+                asof,
+                closes[order.symbol],
+                stage,
+                extra_sell_slip_bps=FLATTEN_NO_BAR_EXTRA_BPS if order.symbol in missing else None,
+                flag=",".join(flags) or None,
+                reason=(
+                    OrderReason.FLATTEN_NO_BAR
+                    if order.symbol in missing
+                    else OrderReason.FLATTEN_LATE
+                    if late
+                    else None
+                ),
+            )
             self._finish(done)
             events.extend(evs)
             (fills if done.status is OrderStatus.FILLED else rejected).append(done)
@@ -315,12 +348,19 @@ class SimBroker:
         )
 
     def _fill(
-        self, order: Order, asof: AsOf, open_price: Decimal, stage: Stage = Stage.OPEN_FILL
+        self,
+        order: Order,
+        asof: AsOf,
+        open_price: Decimal,
+        stage: Stage = Stage.OPEN_FILL,
+        *,
+        extra_sell_slip_bps: Decimal | None = None,
+        flag: str | None = None,
+        reason: OrderReason | None = None,
     ) -> tuple[Order, list[LedgerEvent]]:
         ac = self._asset_class_of(order.symbol)
         cost = self._config.costs[ac]
         qty = order.qty_requested
-        reason: OrderReason | None = None
         state = self.portfolio.ledger.state_view
         if order.side is Side.BUY:
             price = costs.buy_fill_price(open_price, cost.slip_bps)
@@ -331,7 +371,7 @@ class SimBroker:
                 )
                 reason = OrderReason.SHRUNK_CASH
         else:
-            price = costs.sell_fill_price(open_price, cost.slip_bps)
+            price = costs.sell_fill_price(open_price, cost.slip_bps + (extra_sell_slip_bps or 0))
             pos = state.positions.get(order.sleeve_id, {}).get(order.symbol)
             held = pos.qty if pos is not None else Decimal(0)
             qty = min(qty, held)  # defensive; submit_orders already checks holdings
@@ -356,6 +396,7 @@ class SimBroker:
                 order_id=order.order_id,
                 fee=fee,
                 slippage_cost=costs.slippage_cost(price, open_price, qty),
+                **({"metadata": {"flag": flag}} if flag else {}),
             )
         except LedgerError:
             return transition(order, OrderStatus.REJECTED, reason=OrderReason.INSUFFICIENT_CASH), []

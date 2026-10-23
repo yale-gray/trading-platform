@@ -12,6 +12,13 @@ the bars. On a session's last bar it tells the engine (``session_end=True``, whi
 ``intraday_flatten`` account at that bar's close) and submits no new targets, and it clears the
 target books so nothing is bought into the close. With 500 symbols it runs the engine in
 ``lean`` mode, building ``Bar`` objects only for symbols the engine asks about.
+
+Decision lag (ADR-0001 A22): with ``decision_lag_bars = L`` a signal computed on bar t's close is
+submitted while stepping bar t+L, so it fills at bar t+1+L's open. The default is 1 for 15m
+strategies (the free SIP feed arrives after the next bar has opened) and 0 for daily ones, so
+backtest and runner behave identically. A decision never reaches back across a session boundary,
+and if a session's last bar never arrived the first bar of the next session sells whatever is
+still held at its open (``FLATTEN_LATE``, audit 007 m7).
 """
 
 from __future__ import annotations
@@ -50,6 +57,11 @@ _NY = "America/New_York"
 
 
 # ---------------------------------------------------------------------------- TargetBook
+
+
+# A22: SIP bars arrive ~31 min after they open (free plan), i.e. after bar t+2 opens,
+# so the earliest achievable live fill for a bar-t signal is bar t+3's open.
+INTRADAY_DECISION_LAG = 2
 
 
 class TargetBook:
@@ -272,6 +284,7 @@ class BarDriver:
         start: date,
         book: TargetBook | None = None,
         lean: bool | None = None,
+        decision_lag_bars: int | None = None,
     ) -> None:
         self._engine = engine
         self._start = start
@@ -303,6 +316,14 @@ class BarDriver:
             raise ValueError(f"strategies mix timeframes {sorted(timeframes)}")
         self._intraday = timeframes == {"15m"}
         self._lean = self._intraday if lean is None else lean
+        lag = (
+            (INTRADAY_DECISION_LAG if self._intraday else 0)
+            if decision_lag_bars is None
+            else int(decision_lag_bars)
+        )
+        if lag < 0:
+            raise ValueError(f"decision_lag_bars must be >= 0, got {lag}")
+        self._lag = lag
         self._flatten = bool(getattr(getattr(engine, "config", None), "intraday_flatten", False))
         # Causal per-symbol arrays; vol20/atr14 are attached to each Bar (ADR D4). Built per
         # symbol on first use: a 500-symbol intraday run only ever needs the traded ones.
@@ -450,6 +471,8 @@ class BarDriver:
             extra["lean"] = True
         if session_end:
             extra["session_end"] = True
+        if self._flatten and self._stale_session(ts):
+            extra["late_flatten"] = True
         result = self._engine.process_bar(asof, self._bars_at(ts), **extra)
         if session_end and self._flatten:
             # Positions were just sold at this close; buying now would carry overnight.
@@ -467,19 +490,21 @@ class BarDriver:
             sid = slot.sleeve_id
             i = int(slot.feats.calendar.get_indexer([ts])[0])
             force = rearmed or not self._book.has_decision(sid)
+            dts = self._decision_bar(slot, i, ts)  # the bar whose close the signal is read from
             decision = (
-                i >= 0
-                and day >= self._start
-                and i >= slot.compiled.warmup_bars - 1
-                and (force or slot.compiled.is_decision_bar(ts, slot.feats))
+                dts is not None
+                and dts.date() >= self._start
+                and i - self._lag >= slot.compiled.warmup_bars - 1
+                and (force or slot.compiled.is_decision_bar(dts, slot.feats))
             )
             if decision:
+                assert dts is not None
                 held = {
                     p.symbol: HeldPosition(symbol=p.symbol, entry_ts=asof_timestamp(p.entry_asof))
                     for p in positions[sid]
                     if p.qty > 0 and p.entry_asof is not None
                 }
-                sig = slot.compiled.evaluate(slot.feats, ts, held, force_decision=force)
+                sig = slot.compiled.evaluate(slot.feats, dts, held, force_decision=force)
                 self._book.update(sig)
                 signals[sid] = sig
             if decision or result.rebalance_planned:
@@ -487,6 +512,28 @@ class BarDriver:
                     sid, self._book.weights(sid), asof
                 )
         return StepResult(asof=asof, ts=ts, bar_result=result, signals=signals, targets=targets)
+
+    def _decision_bar(self, slot: _Slot, i: int, ts: pd.Timestamp) -> pd.Timestamp | None:
+        """The bar to evaluate while stepping ``ts`` (row ``i``): ``lag`` rows earlier, or None.
+
+        None if ``ts`` is not in the strategy calendar, the row does not exist, or (intraday) the
+        decision bar belongs to an earlier session than ``ts``.
+        """
+        if i < 0 or i - self._lag < 0:
+            return None
+        if self._lag == 0:
+            return ts
+        dts = pd.Timestamp(slot.feats.calendar[i - self._lag])
+        if self._intraday and dts.tz_convert(_NY).date() != ts.tz_convert(_NY).date():
+            return None
+        return dts
+
+    def _stale_session(self, ts: pd.Timestamp) -> bool:
+        """True if the engine's last processed bar is from an earlier NY session than ``ts``."""
+        last = self._engine.last_processed_asof
+        if last is None or not isinstance(last, datetime):
+            return False
+        return asof_timestamp(last).tz_convert(_NY).date() < ts.tz_convert(_NY).date()
 
     def run(self, end: date | None = None, after: AsOf | None = None) -> Iterator[StepResult]:
         """Step every master-calendar bar in order (backtest loop and runner catch-up).

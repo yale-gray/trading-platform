@@ -232,11 +232,12 @@ class Runner:
         except DataError as exc:
             self._record(pid, "data_unavailable", f"{type(exc).__name__}: {exc}", now)
             return PortfolioTick(name, "data_unavailable", error=str(exc))
-        ready: list[pd.Timestamp] = []
-        for ts in due:
-            if not any(ts in f.index for f in frames.values()):
-                break
-            ready.append(ts)
+        # A due bar with no data for any symbol is skipped only if a LATER due bar has data: SIP
+        # delivers in order, so that bar is never coming, and waiting would strand the positions
+        # (audit 007 m7; the driver then flattens them at the next bar's open as FLATTEN_LATE).
+        present = [any(ts in f.index for f in frames.values()) for ts in due]
+        n_handled = max((k + 1 for k, ok in enumerate(present) if ok), default=0)
+        ready: list[pd.Timestamp] = [ts for ts, ok in zip(due, present, strict=True) if ok]
         if not ready:
             msg = f"no data for bar {due[0].isoformat()}"
             self._record(pid, "data_unavailable", msg, now)
@@ -249,9 +250,9 @@ class Runner:
             self._commit_bar(ctx, step, _naive_ts(ts), now, catchup=catchup)
             self._hook("after_commit")
         status: Literal["ok", "data_unavailable"] = (
-            "ok" if len(ready) == len(due) else "data_unavailable"
+            "ok" if n_handled == len(due) else "data_unavailable"
         )
-        err = None if status == "ok" else f"no data for bar {due[len(ready)].isoformat()}"
+        err = None if status == "ok" else f"no data for bar {due[n_handled].isoformat()}"
         if status != "ok":
             self._record(pid, status, err, now)
         return PortfolioTick(name, status, processed=list(ready), error=err)
@@ -393,7 +394,11 @@ class Runner:
                     s, pid, bar_ts, state_json, book_json, len(engine.ledger), now_n
                 )
                 repo.prune_checkpoints(s, pid, self.settings.checkpoint_keep)
-                n_fills = sum(1 for e in new_events if e.type is EventType.FILL)
+                fills_ev = [e for e in new_events if e.type is EventType.FILL]
+                n_fills = len(fills_ev)
+                flags = [str(e.metadata.get("flag", "")) for e in fills_ev]
+                n_no_bar = sum("FLATTEN_NO_BAR" in f for f in flags)
+                n_late = sum("FLATTEN_LATE" in f for f in flags)
                 repo.insert_run_log(
                     s,
                     pid,
@@ -407,6 +412,8 @@ class Runner:
                         "n_ledger_events": len(new_events),
                         "kill_switch_tripped": result.kill_switch_tripped,
                         "rebalance_planned": result.rebalance_planned,
+                        **({"flatten_no_bar": n_no_bar} if n_no_bar else {}),
+                        **({"flatten_late": n_late} if n_late else {}),
                         **({"benchmark_missing": ctx.defn.benchmark} if bench_missing else {}),
                     },
                 )

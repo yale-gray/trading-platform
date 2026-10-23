@@ -66,6 +66,7 @@ def _assert_equals_backtest(db: Engine, defn: PortfolioDef, end: date) -> None:
     assert got == want  # exactly equal, not approximately
 
 
+@pytest.mark.slow
 def test_catch_up_after_five_missed_sessions_equals_daily_run_and_backtest(
     tmp_path: Path, market_cache: Path
 ) -> None:

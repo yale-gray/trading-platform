@@ -75,6 +75,8 @@ class BacktestConfig(BaseModel):
     end: date
     engine: EngineConfig
     rf_annual: float = 0.0
+    # Bars between a signal's bar and its submission (ADR-0001 A22); None = 1 for 15m, 0 for daily.
+    decision_lag_bars: int | None = None
 
 
 class BacktestResult(BaseModel):
@@ -169,6 +171,8 @@ def _config_payload(cfg: BacktestConfig) -> dict[str, Any]:
         flags["intraday_flatten"] = True
     if eng.settlement != "none":
         flags["settlement"] = eng.settlement
+    if cfg.decision_lag_bars is not None:
+        flags["decision_lag_bars"] = cfg.decision_lag_bars
     return {
         **flags,
         "start": cfg.start.isoformat(),
@@ -286,7 +290,9 @@ def run_backtest(cfg: BacktestConfig, bars: Mapping[str, pd.DataFrame]) -> Backt
     validate_bars({s: canon[s] for s in needed})
     _check_warmup(cfg, canon)
     engine = PortfolioEngine(build_engine_config(cfg.engine, cfg.sleeves))
-    driver = BarDriver(engine, cfg.sleeves, canon, start=cfg.start)
+    driver = BarDriver(
+        engine, cfg.sleeves, canon, start=cfg.start, decision_lag_bars=cfg.decision_lag_bars
+    )
     steps: list[StepResult] = list(driver.run(end=cfg.end))
     if not steps:
         raise ValueError("no bars in the backtest window")
@@ -377,7 +383,12 @@ def _bench_config(
         }
     )
     return BacktestConfig(
-        sleeves=sleeves, start=cfg.start, end=cfg.end, engine=eng, rf_annual=cfg.rf_annual
+        sleeves=sleeves,
+        start=cfg.start,
+        end=cfg.end,
+        engine=eng,
+        rf_annual=cfg.rf_annual,
+        decision_lag_bars=cfg.decision_lag_bars,  # same lag as the fund (matches the runner)
     )
 
 

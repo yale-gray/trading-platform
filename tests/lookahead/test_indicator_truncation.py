@@ -23,6 +23,8 @@ from tradebot.strategy.indicators import (
     devatr,
     ema,
     macd,
+    noise_lower,
+    noise_upper,
     ret,
     rsi,
     sma,
@@ -40,6 +42,8 @@ INDICATOR_CASES: dict[str, tuple[BarsFn, int]] = {
     "atr": (lambda b: atr(b["high"], b["low"], b["close"], 14), 14),
     "devatr": (lambda b: devatr(b["high"], b["low"], b["close"], 20), 20),
     "vol": (lambda b: vol(b["close"], 20), 20),
+    "noise_upper": (lambda b: noise_upper(b["open"], b["close"], 20), 20),
+    "noise_lower": (lambda b: noise_lower(b["open"], b["close"], 20), 20),
 }
 _NAMES = sorted(INDICATOR_CASES)
 

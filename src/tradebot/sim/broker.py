@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict
 from tradebot.data.types import AssetClass
 from tradebot.portfolio.asof import AsOf
 from tradebot.portfolio.config import EngineConfig
+from tradebot.portfolio.cost_tiers import tier_extra_fee_bps, tier_slip_bps
 from tradebot.portfolio.ledger import LedgerError
 from tradebot.portfolio.models import Dec, FillSide, LedgerEvent, PortfolioSnapshot, Stage
 from tradebot.portfolio.money import buy_qty, money_context, qty_quantum, to_price
@@ -360,18 +361,24 @@ class SimBroker:
     ) -> tuple[Order, list[LedgerEvent]]:
         ac = self._asset_class_of(order.symbol)
         cost = self._config.costs[ac]
+        profile = self._config.cost_profile
+        is_sell = order.side is Side.SELL
+        slip_bps = cost.slip_bps if profile == "flat" else tier_slip_bps(order.symbol, profile)
+        # Tiered profiles: the tier figure is the whole per-side crypto cost, so no asset-class fee.
+        base_fee = Decimal(0) if profile != "flat" and ac is AssetClass.CRYPTO else cost.fee_bps
+        fee_bps = base_fee + tier_extra_fee_bps(order.symbol, is_sell, profile)
         qty = order.qty_requested
         state = self.portfolio.ledger.state_view
         if order.side is Side.BUY:
-            price = costs.buy_fill_price(open_price, cost.slip_bps)
+            price = costs.buy_fill_price(open_price, slip_bps)
             cash = state.spendable(order.sleeve_id, asof)  # settled cash only (T+1 accounts)
-            if not self._buy_affordable(qty, price, cost.fee_bps, cash):
+            if not self._buy_affordable(qty, price, fee_bps, cash):
                 qty = self._shrink_buy(
-                    qty, price, cost.fee_bps, cash, ac, self._config.equity_qty_quantum
+                    qty, price, fee_bps, cash, ac, self._config.equity_qty_quantum
                 )
                 reason = OrderReason.SHRUNK_CASH
         else:
-            price = costs.sell_fill_price(open_price, cost.slip_bps + (extra_sell_slip_bps or 0))
+            price = costs.sell_fill_price(open_price, slip_bps + (extra_sell_slip_bps or 0))
             pos = state.positions.get(order.sleeve_id, {}).get(order.symbol)
             held = pos.qty if pos is not None else Decimal(0)
             qty = min(qty, held)  # defensive; submit_orders already checks holdings
@@ -383,7 +390,7 @@ class SimBroker:
             )
             return transition(order, OrderStatus.REJECTED, reason=zero_reason), []
         notional = costs.notional(qty, price)
-        fee = costs.fee(notional, cost.fee_bps)
+        fee = costs.fee(notional, fee_bps)
         try:
             evs = self.portfolio.ledger.append_fill(
                 asof=asof,

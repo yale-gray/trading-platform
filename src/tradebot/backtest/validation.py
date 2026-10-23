@@ -18,13 +18,15 @@ from __future__ import annotations
 import itertools
 import logging
 import math
+import statistics
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
+from pathlib import Path
 from typing import Any, Literal
 
 import pandas as pd
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from tradebot.backtest.engine import (
     BacktestConfig,
@@ -35,11 +37,27 @@ from tradebot.backtest.engine import (
     run_with_benchmark,
 )
 from tradebot.backtest.metrics import Metrics, compute_metrics
+from tradebot.backtest.protocol import (
+    DEFAULT_HOLDOUT_LOG,
+    DsrResult,
+    EdgeResult,
+    HoldoutLog,
+    OverlayResult,
+    daily_returns,
+    deflated_sharpe,
+    edge_vs_tbills,
+    holm_adjust,
+    null_sharpe_variance,
+    spy_overlay,
+)
+from tradebot.backtest.registry import DEFAULT_REGISTRY_PATH, TrialRecord, TrialRegistry
 from tradebot.data.symbols import normalize_symbol
 from tradebot.strategy.engine import compile_strategy
 from tradebot.strategy.schema import _INT_KINDS, StrategySpec, _map_params
 
 __all__ = [
+    "HOLDOUT_START",
+    "BatchEntry",
     "CheckResult",
     "DataView",
     "ForwardStats",
@@ -49,6 +67,7 @@ __all__ = [
     "HistoryCheck",
     "OosRegistry",
     "OosRun",
+    "ProtocolVerdict",
     "Runners",
     "SensitivityResult",
     "Split",
@@ -56,9 +75,12 @@ __all__ = [
     "WalkForwardConfig",
     "WalkForwardResult",
     "check_history",
+    "evaluate_batch",
     "evaluate_gate",
     "forward_stats",
     "make_is_view",
+    "open_holdout",
+    "protocol_verdict",
     "run_fund_report",
     "run_oos",
     "run_validation",
@@ -74,6 +96,8 @@ Backtester = Callable[[BacktestConfig, Mapping[str, pd.DataFrame]], BacktestRepo
 Status = Literal["passed", "failed", "pending"]
 NAN = float("nan")
 ATR_PERIOD = 14
+HOLDOUT_START = date(2024, 1, 1)
+"""ADR-0001 A25: bars on or after this date are the final hold-out, opened via open_holdout."""
 
 
 # ---------------------------------------------------------------------------- runners
@@ -129,6 +153,16 @@ class WalkForwardConfig(BaseModel):
             return cls(train_bars=548, test_bars=182, step_bars=182)
         return cls(train_bars=756, test_bars=252, step_bars=252)
 
+    @classmethod
+    def protocol_2026(cls, asset_class: str, bars_per_day: int = 1) -> WalkForwardConfig:
+        """ADR-0001 A24: 2y/1y/1y in sessions (504/252/252) x ``bars_per_day`` (any class)."""
+        del asset_class  # same session-based windows for every class
+        return cls(
+            train_bars=504 * bars_per_day,
+            test_bars=252 * bars_per_day,
+            step_bars=252 * bars_per_day,
+        )
+
 
 class GateConfig(BaseModel):
     """Gate thresholds (ADR-0001 D10 defaults; PM-tunable)."""
@@ -146,6 +180,22 @@ class GateConfig(BaseModel):
     sens_sharpe_floor: float = 0.5  # variant collapses if sharpe < floor * base sharpe
     sens_dd_mult: float = 1.5  # ... or |max_dd| > mult * |base max_dd|
     forward_min_days: int = 90
+    # Evidence protocol (ADR-0001 A24-A26); inert unless ``protocol`` is set
+    protocol: bool = False
+    dsr_min: float = 0.95
+    edge_alpha: float = 0.05
+    overlay_alpha_t: float = 2.0
+
+    @classmethod
+    def protocol_2026(cls) -> GateConfig:
+        """ADR-0001 A24/A30 thresholds: 60 trades, 7y equity, 5y crypto, 3 walk-forward windows."""
+        return cls(
+            min_trades=60,
+            min_years_equity=7.0,
+            min_years_crypto=5.0,
+            wf_min_windows=3,
+            protocol=True,
+        )
 
 
 # ---------------------------------------------------------------------------- helpers
@@ -751,6 +801,11 @@ class ValidationReport(BaseModel):
     forward: ForwardStats | None = None
     wf_skip_reason: str | None = None  # walk-forward not run (too few in-sample bars)
     n_trials: int = 0  # backtests run on parameter sets (for a later deflated Sharpe)
+    dsr: DsrResult | None = None  # protocol runs only (A24)
+    edge: EdgeResult | None = None  # A26(a)
+    overlay: OverlayResult | None = None  # A26(b)
+    # Daily net returns of the full run (protocol runs); input to the batch-level DSR (A30)
+    protocol_returns: list[float] | None = Field(default=None, exclude=True, repr=False)
 
 
 class CheckResult(BaseModel):
@@ -941,7 +996,173 @@ def evaluate_gate(report: ValidationReport, cfg: GateConfig | None = None) -> Ga
                 values={"span_days": fwd.span_days},
             )
         )
+
+    # Gate 7 (protocol only): deflated Sharpe ratio
+    if c.protocol:
+        d = report.dsr
+        if d is None:
+            out.append(
+                CheckResult(gate=7, name="deflated_sharpe", status="pending", detail="not run")
+            )
+        else:
+            ok7 = _ge(d.dsr, c.dsr_min)
+            out.append(
+                CheckResult(
+                    gate=7,
+                    name="deflated_sharpe",
+                    status="passed" if ok7 else "failed",
+                    detail=(
+                        f"DSR {d.dsr:.3f} (need {c.dsr_min:.2f}); N={d.n_trials}, T={d.n_obs}, "
+                        f"SR0={d.sr0:.4f}/period"
+                    ),
+                    values={"dsr": _num(d.dsr), "n_trials": d.n_trials, "sr0": _num(d.sr0)},
+                )
+            )
     return GateResult(checks=out)
+
+
+class ProtocolVerdict(BaseModel):
+    """ADR-0001 A26 verdict: ``advance`` means "advance to hold-out", never "trade it"."""
+
+    model_config = ConfigDict(frozen=True)
+
+    advance: bool
+    reasons: list[str]  # what failed (empty when advancing)
+    holm_p: float | None = None
+
+
+def protocol_verdict(
+    report: ValidationReport,
+    result: GateResult,
+    holm_p: float | None,
+    cfg: GateConfig | None = None,
+) -> ProtocolVerdict:
+    """Gates 1, 2, 4, 5, 7 + Holm-adjusted T-bill edge + SPY overlay value. Gate 3 is excluded."""
+    c = cfg or GateConfig.protocol_2026()
+    why: list[str] = []
+    needed = ((1, "history"), (2, "walk-forward"), (4, "trades"), (5, "sensitivity"))
+    for g, name in (*needed, (7, "deflated Sharpe")):
+        ok = any(ch.gate == g and ch.status == "passed" for ch in result.checks)
+        if not ok:
+            why.append(f"gate {g} ({name}) not passed")
+    if holm_p is None or not holm_p < c.edge_alpha:
+        why.append(f"Holm-adjusted T-bill edge p={holm_p} (need < {c.edge_alpha})")
+    ov = report.overlay
+    if ov is None or not (
+        (math.isfinite(ov.alpha_t) and ov.alpha_t > c.overlay_alpha_t)
+        or (
+            math.isfinite(ov.sharpe_mix)
+            and math.isfinite(ov.sharpe_spy)
+            and ov.sharpe_mix > ov.sharpe_spy
+        )
+    ):
+        why.append("overlay adds no value (alpha t <= threshold and 50/50 Sharpe <= SPY)")
+    return ProtocolVerdict(advance=not why, reasons=why, holm_p=holm_p)
+
+
+class BatchEntry(BaseModel):
+    """One strategy's batch outcome: Holm-adjusted p, its gates and the protocol verdict."""
+
+    model_config = ConfigDict(frozen=True)
+
+    strategy_id: str
+    raw_p: float
+    holm_p: float
+    gate: GateResult
+    verdict: ProtocolVerdict
+    dsr: DsrResult | None = None  # the batch-level DSR behind gate 7 (A30)
+
+
+def _batch_dsr(items: list[ValidationReport], trials: TrialRegistry) -> dict[str, DsrResult]:
+    """Gate-7 DSR for every report with ``protocol_returns``, computed together (ADR A30).
+
+    V comes only from protocol trials: this batch plus protocol-flagged registry rows (the
+    seeded failures are in N but not V), floored per candidate at the null Sharpe variance
+    ``(1 + SR^2/2)/T``. Nothing depends on the order of ``items`` or of registry appends.
+    """
+    cands = [r for r in items if r.protocol_returns]
+    ids = {r.strategy_id for r in items}
+    sr = {
+        r.strategy_id: deflated_sharpe(r.protocol_returns or [], trial_sharpes=[]).sharpe_period
+        for r in cands
+    }
+    pool = [s for s in sr.values() if math.isfinite(s)] + trials.protocol_sharpes(ids)
+    v_pool = float(statistics.variance(pool)) if len(pool) > 1 else 0.0
+    n = len({r.id for r in trials.records} | ids)
+    out: dict[str, DsrResult] = {}
+    for r in cands:
+        rets = r.protocol_returns or []
+        s = sr[r.strategy_id]
+        floor = null_sharpe_variance(s, len(rets)) if math.isfinite(s) else 0.0
+        out[r.strategy_id] = deflated_sharpe(
+            rets, trial_sharpes=pool, n_trials=n, variance=max(v_pool, floor)
+        )
+    return out
+
+
+def evaluate_batch(
+    reports: Mapping[str, ValidationReport] | list[ValidationReport],
+    cfg: GateConfig | None = None,
+    *,
+    trials: TrialRegistry | None = None,
+    batch: str | None = None,
+    record: bool = False,
+    as_of: str | None = None,
+    periods_per_year: float = 252.0,
+) -> dict[str, BatchEntry]:
+    """Holm across one batch (one-sided T-bill edge p) + DSR + verdicts, all batch-level.
+
+    With ``trials`` the DSR (gate 7) is computed here for every report that carries
+    ``protocol_returns`` (see :func:`_batch_dsr`); without it reports keep whatever ``dsr`` they
+    have. ``record=True`` (needs ``trials`` and ``as_of``, an ISO date) then writes each report
+    to the registry as a protocol trial (``status`` advanced/failed, an existing id is
+    replaced), after all numbers are final so the order cannot matter.
+    """
+    c = cfg or GateConfig.protocol_2026()
+    items = list(reports.values()) if isinstance(reports, Mapping) else list(reports)
+    ids = [r.strategy_id for r in items]
+    if len(set(ids)) != len(ids):
+        raise ValueError("duplicate strategy ids in batch")
+    if record and trials is None:
+        raise ValueError("record=True needs a trial registry")
+    if record and not as_of:
+        raise ValueError("record=True needs as_of (ISO date of the batch run)")
+    if trials is not None:
+        dsrs = _batch_dsr(items, trials)
+        items = [r.model_copy(update={"dsr": dsrs[r.strategy_id]}) if r.strategy_id in dsrs else r
+                 for r in items]  # fmt: skip
+    raw = [r.edge.p_value if r.edge is not None else 1.0 for r in items]
+    adj = holm_adjust(raw)
+    out: dict[str, BatchEntry] = {}
+    for r, p, a in zip(items, raw, adj, strict=True):
+        gr = evaluate_gate(r, c)
+        out[r.strategy_id] = BatchEntry(
+            strategy_id=r.strategy_id,
+            raw_p=p,
+            holm_p=a,
+            gate=gr,
+            verdict=protocol_verdict(r, gr, a, c),
+            dsr=r.dsr,
+        )
+    if record and trials is not None:
+        for r in items:
+            d = r.dsr
+            sp = d.sharpe_period if d is not None and math.isfinite(d.sharpe_period) else None
+            rec = TrialRecord(
+                id=r.strategy_id,
+                date=as_of or "",
+                status="advanced" if out[r.strategy_id].verdict.advance else "failed",
+                sharpe_period=sp,
+                sharpe_annual=None if sp is None else sp * math.sqrt(periods_per_year),
+                n_obs=None if d is None else d.n_obs,
+                batch=batch,
+                protocol=True,
+            )
+            if r.strategy_id in trials:
+                trials.replace(rec)
+            else:
+                trials.append(rec)
+    return out
 
 
 # ---------------------------------------------------------------------------- orchestration
@@ -959,13 +1180,33 @@ def run_validation(
     forward: ForwardStats | None = None,
     gate: GateConfig | None = None,
     runners: Runners = DEFAULT_RUNNERS,
+    holdout_start: date | None = None,
+    protocol: bool = False,
+    spy_bars: pd.DataFrame | None = None,
 ) -> ValidationReport:
     """Run gates 1-5 end to end: split, history, walk-forward + sweep on IS, OOS once.
 
     ``cfg.start``/``cfg.end`` bound the whole run (IS + OOS); the split is made on the
     strategy calendar inside that range.
+
+    ``holdout_start`` (A25, normally :data:`HOLDOUT_START`) drops every bar on or after it
+    before anything else runs. ``protocol=True`` (A24/A26) also fills ``edge`` and ``overlay`` and
+    keeps the daily returns for :func:`evaluate_batch` (the DSR is batch-level, A30; ``dsr`` stays
+    None here). SPY comes from ``spy_bars`` or the ``SPY`` frame in ``bars``; a protocol run with
+    neither raises ``ValueError`` (A30), instead of silently skipping the overlay.
     """
     canon = _canon(bars)
+    if holdout_start is not None:
+        lim = _ts(holdout_start)
+        canon = {k: v.loc[v.index < lim] for k, v in canon.items()}
+        if spy_bars is not None:
+            spy_bars = spy_bars.loc[spy_bars.index < lim]
+        if cfg.end >= holdout_start:
+            cfg = cfg.model_copy(update={"end": holdout_start - timedelta(days=1)})
+    if protocol:
+        spy_check = spy_bars if spy_bars is not None else canon.get("SPY")
+        if spy_check is None or not len(spy_check):
+            raise ValueError("protocol=True needs SPY bars: pass spy_bars or include SPY in bars")
     target = _target_sleeve(cfg, sleeve_id)
     assert target.strategy is not None
     full_cal = strategy_calendar(cfg, canon)
@@ -1006,6 +1247,16 @@ def run_validation(
     reg.freeze(cfg)
     oos = run_oos(cfg, canon, cut=cut, registry=reg, runners=runners)
     full = runners.fund(cfg, canon)
+    edge = overlay = None
+    proto_rets: list[float] | None = None
+    if protocol:
+        rets = daily_returns(full.result.equity)
+        ppy = full.result.periods_per_year
+        edge = edge_vs_tbills(rets, periods_per_year=ppy)
+        spy = spy_bars if spy_bars is not None else canon.get("SPY")
+        assert spy is not None
+        overlay = spy_overlay(rets, daily_returns(spy["close"]), periods_per_year=ppy)
+        proto_rets = [float(x) for x in rets.to_numpy()]
     return ValidationReport(
         strategy_id=_strategy_id(cfg),
         history=history,
@@ -1018,4 +1269,56 @@ def run_validation(
         sensitivity=sens,
         forward=forward,
         n_trials=wf_res.n_trials + 1 + len(sens.variants) + 1,
+        edge=edge,
+        protocol_returns=proto_rets,
+        overlay=overlay,
     )
+
+
+# ---------------------------------------------------------------------------- hold-out (A25)
+
+
+def open_holdout(
+    cfg: BacktestConfig,
+    bars: Mapping[str, pd.DataFrame],
+    strategy_id: str,
+    registry_path: Path | None = None,
+    *,
+    batch: str,
+    log_path: Path | None = None,
+    runners: Runners = DEFAULT_RUNNERS,
+) -> BacktestReport:
+    """Run ``cfg`` once on ``HOLDOUT_START`` onward (earlier bars give warm-up only).
+
+    ``strategy_id`` must be the config's strategy and pre-registered in the trial registry.
+    The opening is written to the hold-out log *before* the run, so a crash still counts.
+    Raises :class:`~tradebot.backtest.protocol.HoldoutError` on a second opening of the same
+    id or a third finalist in ``batch``.
+    """
+    if _strategy_id(cfg) != strategy_id:
+        raise ValueError(f"cfg is for {_strategy_id(cfg)!r}, not {strategy_id!r}")
+    if strategy_id not in TrialRegistry.load(registry_path or DEFAULT_REGISTRY_PATH):
+        raise ValueError(f"{strategy_id!r} is not in the trial registry")
+    if cfg.end < HOLDOUT_START:
+        raise ValueError(f"cfg.end {cfg.end} is before the hold-out start {HOLDOUT_START}")
+    log = HoldoutLog(log_path or DEFAULT_HOLDOUT_LOG)
+    entry: dict[str, object] = {
+        "id": strategy_id,
+        "batch": batch,
+        "config_hash": config_hash(cfg),
+        "start": HOLDOUT_START.isoformat(),
+        "end": cfg.end.isoformat(),
+    }
+    log.record(entry)
+    report = runners.benchmarked(cfg.model_copy(update={"start": HOLDOUT_START}), _canon(bars))
+    m = report.metrics
+    entry.update(
+        {
+            "sharpe": _num(m.sharpe),
+            "total_return": _num(m.total_return),
+            "max_drawdown": _num(m.max_drawdown),
+            "trades": m.trade_count,
+        }
+    )
+    log.save()
+    return report

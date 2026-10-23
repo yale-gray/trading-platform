@@ -18,6 +18,7 @@ from pydantic import (
 )
 
 from tradebot.data.types import AssetClass
+from tradebot.portfolio.cost_tiers import CostProfile
 from tradebot.portfolio.money import CENT_Q, EQUITY_QTY_QUANTUM, money_context
 from tradebot.risk.config import RiskConfig, reject_float
 
@@ -112,6 +113,8 @@ class EngineConfig(BaseModel):
     # ``settlement``: "t1" = cash account, SELL proceeds fund BUYs only from the next trading day.
     intraday_flatten: bool = False
     settlement: Literal["none", "t1"] = "none"
+    # Tiered costs (ADR-0001 A23); omitted from the serialised config at "flat".
+    cost_profile: CostProfile = "flat"
 
     @model_serializer(mode="wrap")
     def _omit_default_flags(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
@@ -120,6 +123,8 @@ class EngineConfig(BaseModel):
             data.pop("intraday_flatten", None)
         if self.settlement == "none":
             data.pop("settlement", None)
+        if self.cost_profile == "flat":
+            data.pop("cost_profile", None)
         return data
 
     @field_validator("equity_qty_quantum", mode="before")

@@ -20,6 +20,8 @@ from tradebot.strategy.indicators import (
     devatr,
     ema,
     macd,
+    noise_lower,
+    noise_upper,
     ret,
     rsi,
     sma,
@@ -252,7 +254,10 @@ def test_zero_length_window_raises(name: str):
 
 
 def test_indicators_registry_has_exact_keys():
-    assert set(INDICATORS) == {"sma", "ema", "ret", "rsi", "macd", "bbands", "atr", "devatr", "vol"}
+    assert set(INDICATORS) == {
+        "sma", "ema", "ret", "rsi", "macd", "bbands", "atr", "devatr", "vol",
+        "noise_upper", "noise_lower",
+    }  # fmt: skip
 
 
 def _random_walk_ohlc() -> tuple[pd.Series, pd.Series, pd.Series]:
@@ -280,6 +285,8 @@ _CALLS = {
     "atr": lambda c, h, lo: atr(h, lo, c, 14),
     "devatr": lambda c, h, lo: devatr(h, lo, c, 5),
     "vol": lambda c, h, lo: vol(c, 20),
+    "noise_upper": lambda c, h, lo: noise_upper(c, c, 5),
+    "noise_lower": lambda c, h, lo: noise_lower(c, c, 5),
 }
 
 # Covers warm-up edges of every call above (sma/ema/ret 4, rsi/atr 14, bbands 19,

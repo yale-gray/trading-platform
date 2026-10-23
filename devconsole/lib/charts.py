@@ -17,7 +17,7 @@ DOWN_COLOR = "#d62728"
 GRID_COLOR = "rgba(128, 128, 128, 0.25)"
 HLINE_COLOR = "rgba(128, 128, 128, 0.6)"
 
-PRICE_INDICATORS = frozenset({"sma", "ema", "bbands"})
+PRICE_INDICATORS = frozenset({"sma", "ema", "bbands", "noise_upper", "noise_lower"})
 OSCILLATOR_INDICATORS = frozenset({"rsi", "atr", "macd", "vol", "ret", "devatr"})
 
 _FLOAT_PARAMS = frozenset({"k"})

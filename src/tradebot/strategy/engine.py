@@ -20,16 +20,20 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from tradebot.data.calendar import sessions as xnys_sessions
+from tradebot.data.events import fomc_dates
 from tradebot.data.symbols import normalize_symbol
 from tradebot.strategy.indicators import INDICATORS
 from tradebot.strategy.schema import (
     AllOf,
     Always,
     AnyOf,
+    CalendarOperand,
     Condition,
     CrossesAbove,
     CrossesBelow,
     Eq,
+    EventOperand,
     Ge,
     Gt,
     IndOperand,
@@ -88,6 +92,10 @@ def _op_key(op: Any, ctx: str) -> tuple | None:
         )  # fmt: skip
     if isinstance(op, SessionOperand):
         return (_canon(op.symbol) if op.symbol else ctx, "session", op.session, op.bars)
+    if isinstance(op, CalendarOperand):
+        return (ctx, "calendar", op.calendar)
+    if isinstance(op, EventOperand):
+        return (ctx, "event", op.event, op.field)
     return None
 
 
@@ -98,7 +106,7 @@ def _compile_operand(op: Any) -> _Reader:
             return float(bh) if bh is not None else math.nan
 
         return read_pos
-    if isinstance(op, (PriceOperand, IndOperand, SessionOperand)):
+    if isinstance(op, (PriceOperand, IndOperand, SessionOperand, CalendarOperand, EventOperand)):
         keys: dict[str, tuple] = {}  # context symbol -> feature key (built once, not per read)
 
         def read_feat(f: Features, ctx: str, i: int, bh: int | None) -> float:
@@ -184,7 +192,7 @@ def _compile_condition(c: Condition) -> _Cond:
 
 def _collect_operands(obj: Any) -> list[Any]:
     """All price/indicator operands inside a condition or operand (depth-first)."""
-    if isinstance(obj, (PriceOperand, IndOperand, SessionOperand)):
+    if isinstance(obj, (PriceOperand, IndOperand, SessionOperand, CalendarOperand, EventOperand)):
         return [obj]
     out: list[Any] = []
     if isinstance(obj, AllOf):
@@ -326,6 +334,8 @@ class CompiledStrategy:
                 series = df[op.price]
             elif key[1] == "session":
                 series = self._session(df, op)
+            elif key[1] in ("calendar", "event"):
+                series = self._clock(df, op, intraday=self.spec.timeframe == "15m")
             else:
                 series = self._indicator(raw, sym, df, op)
             arrays[key] = series.reindex(cal).to_numpy(dtype="float64")
@@ -347,6 +357,26 @@ class CompiledStrategy:
             vals = bar_index.astype("float64")
         elif op.session == "open":
             vals = df["open"].to_numpy(dtype="float64")[start]
+        elif op.session in ("prev_close", "gap"):
+            close = df["close"].to_numpy(dtype="float64")
+            last = np.zeros(codes.max() + 1 if n else 0, dtype=np.int64)
+            last[codes] = np.arange(n)  # last row of each session (codes ascend with time)
+            prev = np.full(n, np.nan)
+            has_prev = codes > 0
+            prev[has_prev] = close[last[codes[has_prev] - 1]]
+            if op.session == "prev_close":
+                vals = prev
+            else:
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    vals = df["open"].to_numpy(dtype="float64")[start] / prev - 1.0
+        elif op.session == "vwap":
+            h, lo, c, v = (
+                df[k].to_numpy(dtype="float64") for k in ("high", "low", "close", "volume")
+            )
+            pv = pd.Series((h + lo + c) / 3.0 * v).groupby(codes).cumsum().to_numpy()
+            cv = pd.Series(v).groupby(codes).cumsum().to_numpy()
+            with np.errstate(divide="ignore", invalid="ignore"):
+                vals = np.where(cv > 0, pv / cv, np.nan)
         else:
             nb = int(op.bars)  # type: ignore[arg-type]
             high = op.session == "range_high"
@@ -354,6 +384,41 @@ class CompiledStrategy:
             part = pd.Series(np.where(bar_index < nb, src, np.nan))
             agg = part.groupby(codes).transform("max" if high else "min").to_numpy()
             vals = np.where(bar_index >= nb - 1, agg, np.nan)
+        return pd.Series(vals, index=idx, dtype="float64")
+
+    @staticmethod
+    def _clock(df: pd.DataFrame, op: Any, intraday: bool) -> pd.Series:
+        """``calendar`` / ``event`` operand per bar from the XNYS calendar (known in advance)."""
+        idx = df.index
+        if len(idx) == 0:
+            return pd.Series([], index=idx, dtype="float64")
+        days = (
+            idx.tz_convert(_NY).tz_localize(None).normalize()
+            if intraday
+            else idx.tz_localize(None).normalize()
+        )
+        lo, hi = days.min(), days.max()
+        if isinstance(op, CalendarOperand):
+            span = xnys_sessions(
+                "SPY", lo.replace(day=1).date(), (hi + pd.offsets.MonthEnd(0)).date()
+            )
+            sess = span.tz_localize(None)
+            month = sess.year * 100 + sess.month
+            ser = pd.Series(month, index=sess)
+            pos = ser.groupby(ser.to_numpy()).cumcount().to_numpy()
+            size = ser.groupby(ser.to_numpy()).transform("size").to_numpy()
+            table = pos + 1 if op.calendar == "tday_of_month" else size - 1 - pos
+            vals = pd.Series(table.astype("float64"), index=sess).reindex(days).to_numpy()
+        else:
+            fomc = pd.DatetimeIndex(pd.to_datetime(list(fomc_dates())))
+            nxt_i = fomc.searchsorted(days, side="left")
+            ok = nxt_i < len(fomc)
+            end = fomc[-1].date()
+            span = xnys_sessions("SPY", lo.date(), max(end, hi.date()))
+            sess = span.tz_localize(None)
+            d_pos = sess.searchsorted(days, side="left")
+            f_pos = sess.searchsorted(fomc[np.minimum(nxt_i, len(fomc) - 1)], side="left")
+            vals = np.where(ok, (f_pos - d_pos).astype("float64"), np.nan)
         return pd.Series(vals, index=idx, dtype="float64")
 
     @staticmethod
@@ -367,6 +432,8 @@ class CompiledStrategy:
                 raw[rkey] = fn(df["high"], df["low"], df["close"], int(op.period))  # type: ignore[arg-type]
             elif name == "devatr":
                 raw[rkey] = fn(df["high"], df["low"], df["close"], int(op.period))  # type: ignore[arg-type]
+            elif name in ("noise_upper", "noise_lower"):
+                raw[rkey] = fn(df["open"], df["close"], int(op.period))  # type: ignore[arg-type]
             elif name == "ret":
                 raw[rkey] = fn(x, int(op.period), int(op.skip or 0))  # type: ignore[arg-type]
             elif name == "macd":

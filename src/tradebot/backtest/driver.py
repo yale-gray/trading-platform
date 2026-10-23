@@ -14,11 +14,15 @@ target books so nothing is bought into the close. With 500 symbols it runs the e
 ``lean`` mode, building ``Bar`` objects only for symbols the engine asks about.
 
 Decision lag (ADR-0001 A22): with ``decision_lag_bars = L`` a signal computed on bar t's close is
-submitted while stepping bar t+L, so it fills at bar t+1+L's open. The default is 1 for 15m
-strategies (the free SIP feed arrives after the next bar has opened) and 0 for daily ones, so
-backtest and runner behave identically. A decision never reaches back across a session boundary,
-and if a session's last bar never arrived the first bar of the next session sells whatever is
-still held at its open (``FLATTEN_LATE``, audit 007 m7).
+submitted while stepping bar t+L, so it fills at bar t+1+L's open. The default is
+``INTRADAY_DECISION_LAG`` = 2 for 15m strategies (the free SIP feed arrives after bar t+1 has
+opened) and 0 for daily ones, so backtest and runner behave identically. A clock-only sleeve
+(``StrategySpec.clock_only()``, A28) has nothing to wait for and uses lag 0 unless the caller
+passes ``decision_lag_bars`` explicitly. In a flattening account a decision never reaches back
+across a session boundary, and if a session's last bar never arrived the first bar of the next
+session sells whatever is still held at its open (``FLATTEN_LATE``, audit 007 m7). A swing
+account (15m, ``intraday_flatten=False``, A27) holds overnight: its decisions may cross sessions
+and pending orders carry to the next session's first bar.
 """
 
 from __future__ import annotations
@@ -235,6 +239,8 @@ class _Slot:
     sleeve_id: str
     compiled: CompiledStrategy
     feats: Features
+    lag: int = 0
+    clock_only: bool = False
 
 
 def _opt(x: float) -> float | None:
@@ -308,7 +314,7 @@ class BarDriver:
             assert strategy is not None
             compiled = compile_strategy(strategy, sid)  # fresh per driver (audit F1)
             feats = compiled.prepare(self._frames)
-            self._slots.append(_Slot(sid, compiled, feats))
+            self._slots.append(_Slot(sid, compiled, feats, clock_only=compiled.spec.clock_only()))
             required.update(compiled.required)
         self._symbols = sorted(required)
         timeframes = {self._slot_timeframe(sl) for sl in self._slots}
@@ -316,14 +322,21 @@ class BarDriver:
             raise ValueError(f"strategies mix timeframes {sorted(timeframes)}")
         self._intraday = timeframes == {"15m"}
         self._lean = self._intraday if lean is None else lean
-        lag = (
-            (INTRADAY_DECISION_LAG if self._intraday else 0)
-            if decision_lag_bars is None
-            else int(decision_lag_bars)
+        if decision_lag_bars is not None and int(decision_lag_bars) < 0:
+            raise ValueError(f"decision_lag_bars must be >= 0, got {decision_lag_bars}")
+        # base lag of a data-reading sleeve; a clock-only sleeve may use 0 (A28), see _Slot.lag
+        self._lag = (
+            int(decision_lag_bars)
+            if decision_lag_bars is not None
+            else (INTRADAY_DECISION_LAG if self._intraday else 0)
         )
-        if lag < 0:
-            raise ValueError(f"decision_lag_bars must be >= 0, got {lag}")
-        self._lag = lag
+        for sl in self._slots:
+            if decision_lag_bars is not None:
+                sl.lag = int(decision_lag_bars)
+            elif self._intraday and not sl.clock_only:
+                sl.lag = INTRADAY_DECISION_LAG
+            else:
+                sl.lag = 0  # daily, or a clock-only rule (A28)
         self._flatten = bool(getattr(getattr(engine, "config", None), "intraday_flatten", False))
         # Causal per-symbol arrays; vol20/atr14 are attached to each Bar (ADR D4). Built per
         # symbol on first use: a 500-symbol intraday run only ever needs the traded ones.
@@ -494,7 +507,7 @@ class BarDriver:
             decision = (
                 dts is not None
                 and dts.date() >= self._start
-                and i - self._lag >= slot.compiled.warmup_bars - 1
+                and i - slot.lag >= slot.compiled.warmup_bars - 1
                 and (force or slot.compiled.is_decision_bar(dts, slot.feats))
             )
             if decision:
@@ -516,15 +529,20 @@ class BarDriver:
     def _decision_bar(self, slot: _Slot, i: int, ts: pd.Timestamp) -> pd.Timestamp | None:
         """The bar to evaluate while stepping ``ts`` (row ``i``): ``lag`` rows earlier, or None.
 
-        None if ``ts`` is not in the strategy calendar, the row does not exist, or (intraday) the
-        decision bar belongs to an earlier session than ``ts``.
+        None if ``ts`` is not in the strategy calendar, the row does not exist, or (intraday,
+        flattening account) the decision bar belongs to an earlier session than ``ts``; a swing
+        account (A27) lets decisions cross sessions.
         """
-        if i < 0 or i - self._lag < 0:
+        if i < 0 or i - slot.lag < 0:
             return None
-        if self._lag == 0:
+        if slot.lag == 0:
             return ts
-        dts = pd.Timestamp(slot.feats.calendar[i - self._lag])
-        if self._intraday and dts.tz_convert(_NY).date() != ts.tz_convert(_NY).date():
+        dts = pd.Timestamp(slot.feats.calendar[i - slot.lag])
+        if (
+            self._intraday
+            and self._flatten
+            and dts.tz_convert(_NY).date() != ts.tz_convert(_NY).date()
+        ):
             return None
         return dts
 

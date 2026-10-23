@@ -82,7 +82,8 @@ def test_session_operand_arguments_are_checked() -> None:
     for bad in (
         {"session": "range_high"},
         {"session": "bar_index", "bars": 4},
-        {"session": "vwap"},
+        {"session": "vwap", "bars": 4},
+        {"session": "gap", "bars": 4},
     ):
         with pytest.raises(ValidationError):
             RulesSpec.model_validate(rules(entry={"gt": [{"price": "close"}, bad]}))

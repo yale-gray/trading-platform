@@ -207,6 +207,55 @@ def vol(x: pd.Series, n: int) -> pd.Series:
     return _unnamed(r.rolling(n, min_periods=n).std(ddof=1))
 
 
+def _noise_sigma(open_: pd.Series, close: pd.Series, n: int) -> tuple[pd.Series, pd.Series]:
+    """(today's session open, sigma) per bar; sigma uses only the previous ``n`` sessions.
+
+    sigma at a bar = mean over the previous ``n`` sessions of |close at the same time of day /
+    that session's open - 1|, taken over the previous ``n`` sessions that have a bar at that
+    time of day (NaN until ``n`` such sessions exist).
+    """
+    idx = close.index
+    ny = (idx if idx.tz is not None else idx.tz_localize("UTC")).tz_convert("America/New_York")
+    codes = pd.factorize(ny.normalize())[0]
+    o = _as_float(open_).to_numpy()
+    c = _as_float(close).to_numpy()
+    n_bars = len(idx)
+    first = np.ones(n_bars, dtype=bool)
+    first[1:] = codes[1:] != codes[:-1]
+    start = np.maximum.accumulate(np.where(first, np.arange(n_bars), 0))
+    sess_open = o[start]
+    tod = (ny.hour * 60 + ny.minute).to_numpy()
+    dev = pd.DataFrame({"d": codes, "t": tod, "v": np.abs(c / sess_open - 1.0)})
+    mat = dev.set_index(["d", "t"])["v"].unstack().sort_index()
+    # Per minute-of-day column: only sessions that have that bar count, so a half day (no
+    # afternoon bars) does not blank the following sessions' afternoon sigma.
+    sig = mat.copy()
+    for col in mat.columns:
+        s = mat[col].dropna()
+        sig[col] = s.shift(1).rolling(n, min_periods=n).mean().reindex(mat.index)
+    rows = sig.index.get_indexer(codes)
+    cols = sig.columns.get_indexer(tod)
+    sigma = sig.to_numpy()[rows, cols]
+    return _series(sess_open, close), _series(sigma, close)
+
+
+def noise_upper(open_: pd.Series, close: pd.Series, n: int) -> pd.Series:
+    """Noise-area upper band ``open_today * (1 + sigma)`` for 15m bars (Zarattini-Aziz-Barbon).
+
+    First valid bar: the first bar of the (n+1)-th session. Causal: sigma reads earlier sessions.
+    """
+    _check_n(n)
+    sess_open, sigma = _noise_sigma(open_, close, n)
+    return _unnamed(sess_open * (1.0 + sigma))
+
+
+def noise_lower(open_: pd.Series, close: pd.Series, n: int) -> pd.Series:
+    """Noise-area lower band ``open_today * (1 - sigma)``; see :func:`noise_upper`."""
+    _check_n(n)
+    sess_open, sigma = _noise_sigma(open_, close, n)
+    return _unnamed(sess_open * (1.0 - sigma))
+
+
 INDICATORS: dict[str, Callable] = {
     "sma": sma,
     "ema": ema,
@@ -217,4 +266,6 @@ INDICATORS: dict[str, Callable] = {
     "atr": atr,
     "devatr": devatr,
     "vol": vol,
+    "noise_upper": noise_upper,
+    "noise_lower": noise_lower,
 }

@@ -1,0 +1,46 @@
+[
+  {
+    "id": "stocks_dt_dip",
+    "commit": "329cbf0",
+    "date": "2026-10-23",
+    "status": "failed",
+    "sharpe_period": -0.145516,
+    "sharpe_annual": -2.31,
+    "n_obs": null,
+    "batch": "daytrading-round1",
+    "notes": "5 bps run; annual Sharpe from docs/research/daytrading-2026-10.md; per-period = annual/sqrt(252) (approximation; source was 15m bars)"
+  },
+  {
+    "id": "stocks_dt_breakout",
+    "commit": "329cbf0",
+    "date": "2026-10-23",
+    "status": "failed",
+    "sharpe_period": -0.180793,
+    "sharpe_annual": -2.87,
+    "n_obs": null,
+    "batch": "daytrading-round1",
+    "notes": "5 bps run; annual Sharpe from docs/research/daytrading-2026-10.md; per-period = annual/sqrt(252) (approximation; source was 15m bars)"
+  },
+  {
+    "id": "etf_dt_late_momentum",
+    "commit": "7a8d6f9",
+    "date": "2026-10-23",
+    "status": "failed",
+    "sharpe_period": -0.257016,
+    "sharpe_annual": -4.08,
+    "n_obs": null,
+    "batch": "daytrading-round2",
+    "notes": "5 bps run; annual Sharpe from docs/research/daytrading-round2-2026-10.md; per-period = annual/sqrt(252) (approximation; source was 15m bars)"
+  },
+  {
+    "id": "etf_dt_opening_drive",
+    "commit": "7a8d6f9",
+    "date": "2026-10-23",
+    "status": "failed",
+    "sharpe_period": -0.095751,
+    "sharpe_annual": -1.52,
+    "n_obs": null,
+    "batch": "daytrading-round2",
+    "notes": "5 bps run; annual Sharpe from docs/research/daytrading-round2-2026-10.md; per-period = annual/sqrt(252) (approximation; source was 15m bars)"
+  }
+]

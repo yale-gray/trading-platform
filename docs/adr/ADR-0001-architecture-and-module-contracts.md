@@ -278,7 +278,99 @@ Each account is a separate portfolio with its own ledger, kill switch and benchm
 **A22 implementation notes (engineer, 2026-10-23).**
 - `DataConfig.intraday_live_feed` now defaults to `None`: the IEX live tail is off for trading (the code stays behind that flag; `MarketData` neither fetches nor uses it, and freshness is judged against SIP availability). Nothing in the API shows IEX.
 - `decision_lag_bars` lives on `BarDriver` and `BacktestConfig` (default `None` = 1 for 15m strategies, 0 for daily, so daily goldens and config hashes are unchanged; the field joins the config hash only when set). With lag L the driver evaluates the strategy on the bar L rows earlier in the strategy calendar, while stepping bar t+L, so the order fills at bar t+1+L's open. A decision never reaches back across a session boundary (the first L bars of a day make none), and the benchmark runs with the fund's lag. The runner builds its `BarDriver` with the default, so live and backtest use the same setting. Parity is tested: a runner fed a SIP-like feed that withholds the latest bar produces the same ledger as `run_backtest` with lag 1.
-- **Known tightness:** a SIP bar is available 31 minutes after it opens (15 min bar + 16 min delay), i.e. 1 minute after bar t+2 has opened, so lag 1 (fill at t+2's open) is optimistic by that minute; lag 2 would be strictly achievable. Left at 1 as decided; revisit if paper results diverge.
+- **Known tightness, resolved (PM, 2026-10-23):** a SIP bar is available 31 minutes after it opens, 1 minute after bar t+2 has opened, so lag 1 was optimistic by that minute. The 15m default is now **2** (`INTRADAY_DECISION_LAG`): fill at bar t+3's open.
+
+## 8. Addendum: research protocol, realistic costs and swing account (owner decision 2026-10-23)
+
+The owner asked for prerequisites P1-P5 from `docs/research/dt-deep/00-summary.md`, then a pre-registered Tier A batch (trial budget N = 12, counting the 4 failed day-trading trials) run on 2016-2023 only.
+
+**A23. Tiered costs (P1).**
+- `EngineConfig.cost_profile: Literal["flat", "tiered", "tiered_stress"] = "flat"`. It is omitted from serialisation at "flat", so goldens, config hashes and old checkpoints stay byte-identical.
+- "flat" is today's behaviour: per-asset-class `CostConfig`.
+- "tiered" is a per-symbol slippage table in `src/tradebot/portfolio/cost_tiers.py`. Values are bps per side:
+
+  | Tier | Symbols | bps |
+  |---|---|---|
+  | Core ETFs | SPY, QQQ, DIA, IWM | 1 |
+  | Leveraged/inverse ETFs | TQQQ, SQQQ, SPXL, SPXS, UPRO, SPXU, SSO, SDS, SH, QLD, PSQ, SOXL, SOXS | 3 |
+  | Mega caps | the 50-name list in `cost_tiers.py` (top S&P 500 by weight, a 2026 snapshot) | 1.5 |
+  | Other equities | everything else | 3 |
+  | Crypto | BTC/USD, ETH/USD | 15 |
+  | Crypto | other crypto | 30 |
+
+- Equities also pay a 0.25 bp sell-side regulatory fee, booked as a fee on SELL fills only.
+- "tiered_stress" doubles every tiered slippage figure; the fee is unchanged.
+- The figures come from report 03, some of them estimates. They are pinned by a test, and changing them is an ADR edit.
+- Rounds 1-2 keep their recorded 5 bps verdicts; nothing is re-run retroactively.
+
+**A24. Research gate additions (P2).** These go in `backtest/validation.py` plus a new `backtest/registry.py`. Nothing changes for existing callers.
+- **Trial registry:** `docs/research/trial-registry.json` holds every strategy id ever pre-registered and tested. Fields: id, pre-registration commit, date, status, Sharpe (per-period and annualised), number of return observations.
+  - It is seeded with the 4 failed day-trading trials.
+  - N is the registry length.
+  - `TrialRegistry.load/append` refuses to append a duplicate id.
+- **Deflated Sharpe ratio:** Bailey & López de Prado 2014, gate 7 `deflated_sharpe`. Inputs: the candidate's daily net returns (skew and kurtosis included), T, N and the variance of the registry's Sharpes. It passes at DSR ≥ 0.95.
+- **Holm:** `evaluate_batch(reports)` applies Holm-Bonferroni at α = 0.05 across one batch to the one-sided p-values of the T-bill edge test (A26).
+- **Protocol gate config:** `GateConfig.protocol_2026()` sets:
+  - `min_trades=100`
+  - `min_years_equity=7` (the development window is 2016-03 to 2023-12)
+  - `min_years_crypto=5`
+  - `wf_min_windows=3`
+  - walk-forward 2y/1y/1y (`WalkForwardConfig.protocol_2026(asset_class, bars_per_day)`: 504/252/252 days × bars per day)
+  - The defaults are unchanged.
+
+**A25. Final hold-out (P3).**
+- `HOLDOUT_START = date(2024, 1, 1)`.
+- `run_validation(..., holdout_start=HOLDOUT_START)` drops every bar on or after it **before anything else runs**. The 70/30 split, walk-forward and sensitivity all live inside 2016-2023.
+- `open_holdout(cfg, bars, strategy_id, registry_path)` runs the strategy once on 2024-01-01 onward. It records the opening in `docs/research/holdout-log.json` and refuses a second opening of the same id.
+- At most 2 finalists per batch may be opened, enforced by counting the log entries for the batch name.
+
+**A26. Two benchmarks (P4).** `ValidationReport` gains both:
+- **(a) Edge vs T-bills:** daily net returns minus the daily T-bill rate, giving a one-sided t-test with a Newey-West (5-lag) standard error, mean, t-stat and p.
+  - The T-bill series is FRED DTB3, committed as `src/tradebot/data/rates/dtb3.csv` (public data, refreshed by hand). Missing days are forward-filled.
+- **(b) SPY overlay:** an OLS of the strategy's daily returns on SPY's, reporting alpha (annualised), its Newey-West t-stat, beta, and the Sharpe of a 50/50 daily-rebalanced SPY + strategy mix against SPY alone.
+- **Protocol verdict** ("advance to hold-out"), all of:
+  - gate 2 walk-forward
+  - gate 4 trades
+  - gate 5 sensitivity
+  - gate 7 DSR
+  - Holm-adjusted T-bill edge p < 0.05
+  - overlay value: alpha t > 2 **or** 50/50 Sharpe > SPY Sharpe
+- Gate 3 (OOS vs SPY) is still computed and reported (hard rule 4: every strategy is *measured* against buy-and-hold). It no longer vetoes a part-time strategy on its own.
+
+**A27. Swing account (P5).**
+- A 15m account with `intraday_flatten=False` holds positions overnight.
+- In that mode a decision **may** cross a session boundary: the driver stops dropping decision bars from an earlier session when the account is not flattening, and pending orders carry over to the next session's first bar.
+- Daily accounts already hold overnight and are unchanged.
+- The T+1 cash rules apply as before.
+- There is no swing preset yet; a preset comes only if a candidate passes.
+
+**A28. Clock-only rules have no data lag.**
+- A rules strategy whose entry and exit conditions reference only clock operands has nothing to wait for, so its sleeve runs with lag 0: decided on bar t, filled at t+1's open.
+- Clock operands are `session.bar_index`, `calendar.*`, `event.*` and numeric constants. `StrategySpec.clock_only()` decides this.
+- Live, such an order can be queued before the bar, so backtest still equals live.
+- Any price, indicator or position operand means the normal lag applies.
+
+**A29. New rule pieces (for Tier A).**
+- **Calendar operands:** `{calendar: tday_of_month}` (1 = first trading day of the month) and `{calendar: tdays_to_month_end}` (0 = last trading day). Both come from the XNYS calendar and work for daily and 15m.
+- **Event operand:** `{event: fomc, field: tdays_until}` counts XNYS trading days until the next scheduled FOMC statement day (0 = statement day).
+  - Dates live in `src/tradebot/data/events/fomc.csv`, scheduled meetings 2015-2027 from federalreserve.gov.
+  - Unscheduled meetings are excluded, because they can't be known in advance.
+- **Previous close:** `{session: prev_close}` is the last close of the previous session, for 15m.
+- **Session VWAP:** `{session: vwap}` is the cumulative typical-price × volume / volume since today's open, for 15m. It is causal.
+- **Noise band:** the `noise_upper` / `noise_lower` indicators (Zarattini-Aziz-Barbon 2024).
+  - Formula: `open_today × (1 ± σ)`, where σ is the mean over the previous `period` sessions of |close at this bar-of-day / that session's open − 1|.
+  - It is causal: only earlier sessions are used for σ.
+
+**A30. Audit 008 decisions (PM, 2026-10-23, before any Tier A result was seen).**
+- **B1, the DSR variance.** V comes only from trials run under the same protocol: the current batch plus later protocol trials, all computed after the batch finishes, so the order trials are recorded doesn't matter. V is floored at the null variance of a Sharpe estimate, `(1 + SR²/2)/T` per period. The 4 seeded failures count in N but not in V.
+- **M2, settlement.** Protocol test accounts use `settlement: none`: a margin account with no leverage. FINRA removed the $25k PDT rule (effective 2026-06-04), so an ordinary small margin account can recycle sale proceeds the same day. The day-trading preset keeps T+1.
+- **M3, minimum trades.** The `protocol_2026` minimum is 60 round trips, not 100, so low-frequency calendar rules can be judged. The DSR, Holm and the T-bill t-test already account for sample size.
+- **M4, the config hash.** `cost_profile` joins the config hash when not "flat".
+- **M5, the noise band.** σ averages over the previous `period` sessions that *have* that minute-of-day bar, so half-days don't blank the next 14 sessions.
+- **M8, the SPY overlay.** `protocol=True` raises if no SPY bars are available, instead of silently returning None.
+- **Crypto under "tiered".** The tier figure is the whole per-side cost, so the asset-class fee is set to 0 (BTC/ETH = 15 bp per side in total).
+- **M6, survivorship.** Results for the stock-universe candidates (A1, A4) are labelled as upward-biased upper bounds.
+- **M7, sensitivity.** Clock-rule bar indices stay literals, so gate 5 is uninformative for A2, A5 and A6, and the write-up says so.
 
 ## Consequences
 - **One loop (`BarDriver`) and one engine** mean a backtest result and a paper result for the same bars must match exactly. SPEC-005 can test that directly.

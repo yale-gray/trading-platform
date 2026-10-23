@@ -45,7 +45,9 @@ PosNum = Annotated[float, Field(gt=0)] | Param  # number > 0 (stop mult) or "$na
 _STRICT = ConfigDict(extra="forbid", populate_by_name=True)
 
 # Indicators with a single output vs. multiple named output columns.
-_SINGLE = {"sma", "ema", "ret", "rsi", "atr", "vol", "devatr"}
+_SINGLE = {"sma", "ema", "ret", "rsi", "atr", "vol", "devatr", "noise_upper", "noise_lower"}
+_NOISE = {"noise_upper", "noise_lower"}
+_CLOCK_SESSION = "bar_index"
 _FIELDS = {
     "macd": {"macd", "signal", "hist"},
     "bbands": {"mid", "upper", "lower", "pctb", "bandwidth"},
@@ -102,13 +104,18 @@ class SessionOperand(BaseModel):
     * ``open``: the session's first open;
     * ``range_high`` / ``range_low``: highest high / lowest low of the session's first ``bars``
       bars (the opening range). NaN until the bar that completes the range
-      (``bar_index >= bars - 1``), then fixed for the rest of the session. Causal.
+      (``bar_index >= bars - 1``), then fixed for the rest of the session. Causal;
+    * ``prev_close``: close of the previous session's last bar (NaN on the first session);
+    * ``gap``: ``open / prev_close - 1`` as a fraction (-0.03 = 3% gap down; NaN on the first
+      session);
+    * ``vwap``: cumulative typical-price x volume / volume since today's open (NaN while the
+      cumulative volume is 0). Causal (ADR-0001 A29).
 
     Only meaningful for ``timeframe: 15m`` (sessions are New York trading days).
     """
 
     model_config = _STRICT
-    session: Literal["bar_index", "open", "range_high", "range_low"]
+    session: Literal["bar_index", "open", "range_high", "range_low", "prev_close", "gap", "vwap"]
     bars: Period | None = None
     symbol: str | None = None
 
@@ -120,6 +127,27 @@ class SessionOperand(BaseModel):
         if not ranged and self.bars is not None:
             raise ValueError(f"session {self.session!r} does not take 'bars'")
         return self
+
+
+class CalendarOperand(BaseModel):
+    """``{calendar: tday_of_month|tdays_to_month_end}`` from the XNYS calendar (A29).
+
+    ``tday_of_month``: 1 = the month's first trading day. ``tdays_to_month_end``: 0 = its last.
+    Known in advance, so causal. Equities only; daily and 15m.
+    """
+
+    model_config = _STRICT
+    calendar: Literal["tday_of_month", "tdays_to_month_end"]
+
+
+class EventOperand(BaseModel):
+    """``{event: fomc, field: tdays_until}``: XNYS trading days to the next scheduled FOMC
+    statement day (0 = statement day; NaN after the last committed date). Equities only (A29).
+    """
+
+    model_config = _STRICT
+    event: Literal["fomc"]
+    field: Literal["tdays_until"]
 
 
 class IndOperand(BaseModel):
@@ -156,6 +184,8 @@ class IndOperand(BaseModel):
             "ret": {"period", "skip"},
             "macd": {"fast", "slow", "signal", "field"},
             "bbands": {"period", "k", "field"},
+            "noise_upper": {"period"},
+            "noise_lower": {"period"},
         }.get(self.ind, set())
         if given - allowed:
             raise ValueError(f"indicator {self.ind!r} does not take {sorted(given - allowed)}")
@@ -167,7 +197,10 @@ class IndOperand(BaseModel):
         return self
 
 
-Operand = float | Param | PriceOperand | PosOperand | IndOperand | SessionOperand
+Operand = (
+    float | Param | PriceOperand | PosOperand | IndOperand | SessionOperand | CalendarOperand
+    | EventOperand
+)  # fmt: skip
 
 
 # --------------------------------------------------------------------------- conditions
@@ -465,6 +498,8 @@ def _lookback(op: dict[str, Any]) -> int:
         return int(op.get("period", 20))
     if name == "devatr":
         return max(int(op["period"]), 14)
+    if name in _NOISE:
+        return int(op["period"]) * 26 + 1  # sessions of 26 fifteen-minute bars
     return int(op["period"]) + (int(op.get("skip") or 0) if name == "ret" else 0)
 
 
@@ -553,6 +588,14 @@ class _StrategyBase(BaseModel):
         ):
             raise ValueError("'session' operands need timeframe '15m'")
 
+        if any(isinstance(d, dict) and ("calendar" in d or "event" in d) for d in _walk(body)):
+            if self.asset_class != "equity":
+                raise ValueError("'calendar' and 'event' operands are for equities only (XNYS)")
+        if self.timeframe != "15m" and any(
+            isinstance(d, dict) and d.get("ind") in _NOISE for d in _walk(body)
+        ):
+            raise ValueError("noise_upper / noise_lower need timeframe '15m'")
+
         # constraints
         for expr in self.constraints:
             if not _check_constraint(expr, params):
@@ -593,6 +636,29 @@ class _StrategyBase(BaseModel):
         out = _map_params(data, sub)
         out["parameters"] = params
         return type(self).model_validate(out)
+
+    def clock_only(self) -> bool:
+        """True iff every rule reads only the clock (ADR-0001 A28).
+
+        Clock operands are ``session.bar_index``, ``calendar.*``, ``event.*`` and constants or
+        parameters, with at least one clock operand present. Any price, indicator, position or
+        other session operand, or a declared stop, makes it False (normal decision lag).
+        """
+        if self.stops:
+            return False
+        has_clock = False
+        for d in _walk(self._body_dump()):
+            if not isinstance(d, dict):
+                continue
+            if "price" in d or "ind" in d or "pos" in d:
+                return False
+            if "session" in d:
+                if d["session"] != _CLOCK_SESSION:
+                    return False
+                has_clock = True
+            elif "calendar" in d or "event" in d:
+                has_clock = True
+        return has_clock
 
     def required_symbols(self) -> list[str]:
         """Sorted symbols needed: universe, fallback and cross-asset operand references."""

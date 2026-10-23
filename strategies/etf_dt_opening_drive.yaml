@@ -1,0 +1,33 @@
+schema_version: 1
+id: etf_dt_opening_drive
+name: SPY/QQQ opening drive (day trade)
+description: >-
+  If SPY or QQQ rises in its first half hour, buy it and hold to the close, selling early only if
+  it falls back below the day's opening price. At most one trade per fund per day.
+kind: rules
+asset_class: equity
+timeframe: 15m
+# PRE-REGISTERED (2026-10-23, written and committed BEFORE any backtest of this id). Second-round
+# day-trading idea after stocks_dt_dip / stocks_dt_breakout failed (docs/research/daytrading-2026-10.md).
+# Do not tune on results; a different value is a new strategy id.
+# Basis: opening-range momentum on index ETFs (Zarattini & Aziz 2023, "Can day trading really be
+# profitable?"; they use 5-min QQQ bars and a range stop, simplified here to 15-min bars).
+# Timing (A22 decision lag 2): decide on the 09:45 bar (bar_index 1, first 30 min complete), fill at
+# the 10:30 open (bar 4). Exit: close below today's open (decided on that bar, filled 3 bars later)
+# OR the account's end-of-session flatten at 16:00.
+# Universe: the two most liquid US ETFs, chosen for tiny spreads (fewer, cheaper trades).
+# Needs an account with intraday_flatten (the daytrading preset style); on its own it would hold overnight.
+parameters:
+  decide_bar: 1
+schedule: {freq: bar}
+entry:
+  all:
+    - eq: [{session: bar_index}, $decide_bar]
+    - gt: [{price: close}, {session: open}]
+exit:
+  lt: [{price: close}, {session: open}]
+position:
+  weight: equal
+universe:
+  - "SPY"
+  - "QQQ"

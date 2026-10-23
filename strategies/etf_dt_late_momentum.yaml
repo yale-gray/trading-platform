@@ -1,0 +1,34 @@
+schema_version: 1
+id: etf_dt_late_momentum
+name: SPY/QQQ late-day momentum (day trade)
+description: >-
+  If SPY or QQQ is up on the day by mid-afternoon, buy it for the last half hour and sell at the
+  close. At most one trade per fund per day.
+kind: rules
+asset_class: equity
+timeframe: 15m
+# PRE-REGISTERED (2026-10-23, written and committed BEFORE any backtest of this id). Second-round
+# day-trading idea after stocks_dt_dip / stocks_dt_breakout failed (docs/research/daytrading-2026-10.md).
+# Do not tune on results; a different value is a new strategy id.
+# Basis: "market intraday momentum": the day's return so far predicts the last half hour
+# (Gao, Han, Li & Zhou 2018, JFE; Baltussen, Da, Lammers & Martens 2021, JFE). The papers measure
+# from the previous close; the schema has no previous-close operand, so this uses today's open.
+# Timing (A22 decision lag 2): decide on the 14:45 bar (bar_index 21, data in at ~15:16), fill at
+# the 15:30 open (bar 24), sold by the account's end-of-session flatten at 16:00. ~30 min held.
+# Universe: the two most liquid US ETFs, chosen for tiny spreads (fewer, cheaper trades).
+# Needs an account with intraday_flatten (the daytrading preset style); on its own it would hold overnight.
+parameters:
+  decide_bar: 21
+schedule: {freq: bar}
+entry:
+  all:
+    - eq: [{session: bar_index}, $decide_bar]
+    - gt: [{price: close}, {session: open}]
+exit:
+  # never fires: the end-of-session flatten is the exit
+  lt: [{session: bar_index}, 0]
+position:
+  weight: equal
+universe:
+  - "SPY"
+  - "QQQ"

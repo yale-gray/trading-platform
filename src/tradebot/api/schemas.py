@@ -86,8 +86,8 @@ class OrderOut(BaseModel):
     status: str
     qty_requested: Money
     qty_filled: Money
-    created_asof: date
-    fill_asof: date | None
+    created_asof: date | datetime  # a date for daily bars, the bar-open timestamp for 15m
+    fill_asof: date | datetime | None
     fill_price: Money | None
     fee: Money | None
     reason: str | None
@@ -108,7 +108,7 @@ class KillSwitchOut(BaseModel):
     threshold_pct: float
     acknowledged_at: datetime | None
     note: str | None
-    pause_ends_after_bar: date | None = None
+    pause_ends_after_bar: date | datetime | None = None
 
 
 class KillSwitchAckIn(BaseModel):

@@ -384,9 +384,13 @@ def total_equity_at(session: Session, portfolio_id: int, ts: datetime) -> Decima
 
 
 def latest_positions(session: Session, portfolio_id: int) -> list[PositionSnapshot]:
-    """Open positions at the latest snapshot bar."""
+    """Open positions at the latest processed bar (none after an end-of-day flatten).
+
+    The bar is the latest equity snapshot, not the latest position row: a flat book writes no
+    position rows, and the last bar holding something would show stale positions.
+    """
     last = session.exec(
-        select(func.max(PositionSnapshot.ts)).where(PositionSnapshot.portfolio_id == portfolio_id)
+        select(func.max(EquitySnapshot.ts)).where(EquitySnapshot.portfolio_id == portfolio_id)
     ).one()
     if last is None:
         return []

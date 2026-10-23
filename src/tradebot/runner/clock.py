@@ -35,6 +35,7 @@ __all__ = [
     "has_bar",
     "market_of",
     "next_equity_run_after",
+    "pause_end_bar_15m",
     "pause_end_bar",
 ]
 
@@ -161,6 +162,14 @@ def pause_end_bar(markets: Iterable[str], tripped: date, pause_bars: int) -> dat
     except ValueError:
         return None
     return d
+
+
+def pause_end_bar_15m(tripped: datetime, pause_bars: int) -> datetime | None:
+    """Naive-UTC open of the ``pause_bars``-th 15m bar after trip bar ``tripped`` (re-arm bar)."""
+    t = pd.Timestamp(tripped, tz="UTC")
+    horizon = t.to_pydatetime() + timedelta(days=pause_bars // 13 + 30)
+    out = due_bars_15m(start=t.date(), after=t, now=horizon, delay_min=0, limit=pause_bars)
+    return out[-1].tz_localize(None).to_pydatetime() if len(out) == pause_bars else None
 
 
 def next_equity_run_after(now: datetime, equity_delay_min: int = 30) -> datetime | None:

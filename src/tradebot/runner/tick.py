@@ -17,8 +17,8 @@ fires: ``tick`` derives the due bars from the calendar and ``runner_state``.
 Day-trading portfolios (ADR-0001 A21, ``PortfolioDef.timeframe() == "15m"``) run the same steps
 per completed 15-minute bar: the due bars come from :func:`due_bars_15m`, the bars are loaded
 with ``timeframe=M15`` and ``bar_ts`` is the bar-open timestamp. One ``tick`` therefore catches
-up every completed bar; running it every 15 minutes during market hours (the scheduler job) is
-the remaining follow-up.
+up every completed bar. The scheduler's ``intraday_bar`` job (``scope="intraday"``) calls it at
+every bar open + 15 min + 1 min during XNYS sessions.
 
 Fault seam: ``fault_hook(point)`` is called at ``after_driver``, ``before_commit`` and
 ``after_commit``. An ``Exception`` from the hook is a normal bar failure (recorded); a
@@ -66,7 +66,7 @@ from tradebot.runner.state import (
 
 logger = logging.getLogger("tradebot.runner")
 
-Scope = Literal["all", "equity", "crypto"]
+Scope = Literal["all", "equity", "crypto", "intraday"]
 
 
 def _ts(d: date) -> pd.Timestamp:
@@ -121,7 +121,7 @@ class Runner:
 
         ``now`` defaults to the injected clock. Benchmarks run before the fund so the fund's
         snapshot can carry the matching ``benchmark_equity``. ``scope`` restricts to
-        equity-only portfolios or to those containing crypto (scheduler jobs).
+        equity-only portfolios, to those containing crypto, or (``"intraday"``) to 15m portfolios.
         """
         now = (now or self.clock.now()).astimezone(UTC)
         with session_scope(self.db) as s:
@@ -158,6 +158,8 @@ class Runner:
                 if scope == "crypto":
                     return None
                 return self._tick_intraday(pid, name, defn, last_ts, now)
+            if scope == "intraday":
+                return None  # the 15-minute job leaves daily portfolios to the close jobs
             markets = defn.markets()
             if (scope == "equity" and markets != ["equity"]) or (
                 scope == "crypto" and "crypto" not in markets

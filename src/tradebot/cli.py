@@ -322,6 +322,15 @@ def _cmd_runner_tick(args: argparse.Namespace) -> int:
     return 1 if any(": error" in ln or "catchup_refused" in ln for ln in lines) else 0
 
 
+def _is_intraday(engine: Any, args: argparse.Namespace) -> bool:
+    from tradebot.db import repo, session_scope
+    from tradebot.runner import PortfolioDef
+
+    with session_scope(engine) as s:
+        p = repo.get_portfolio(s, args.portfolio)
+        return p is not None and PortfolioDef.from_json(p.config_json).timeframe() == "15m"
+
+
 def _cmd_runner_reset_from(args: argparse.Namespace) -> int:
     """Accept a gap: skip the missed bars and resume at DATE (see ``runner.reset_from``)."""
     import getpass
@@ -353,7 +362,13 @@ def _cmd_runner_reset_from(args: argparse.Namespace) -> int:
             f"{args.portfolio}: bars after {res.skipped_after} skipped, "
             f"{len(res.cancelled_orders)} pending order(s) cancelled; "
             f"next bar processed is {args.date}"
+            + (" (09:30 New York)" if _is_intraday(engine, args) else "")
         )
+        if res.open_positions:
+            print(
+                f"warning: still holding {', '.join(res.open_positions)}; "
+                "they are flattened at the close of the first resumed session"
+            )
         with session_scope(engine) as s:
             p = repo.get_portfolio(s, args.portfolio)
             bench = PortfolioDef.from_json(p.config_json).benchmark if p is not None else None
@@ -536,7 +551,10 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--once", action="store_true", help="accepted for clarity; tick is always once")
     c.add_argument("--now", metavar="ISO", help="pretend it is this UTC instant")
     c.set_defaults(func=_cmd_runner_tick)
-    c = g.add_parser("reset-from", help="skip a gap above MAX_CATCHUP_BARS and resume at DATE")
+    c = g.add_parser(
+        "reset-from",
+        help="skip a gap above MAX_CATCHUP_BARS and resume at DATE (15m: a session date)",
+    )
     c.add_argument("portfolio")
     c.add_argument("date", type=_date, metavar="DATE")
     c.set_defaults(func=_cmd_runner_reset_from)

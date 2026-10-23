@@ -1,4 +1,4 @@
-import { Card } from "../components/ui";
+import { Card, Info } from "../components/ui";
 import { GLOSSARY } from "../glossary";
 import { SECTIONS } from "../copy";
 
@@ -21,6 +21,17 @@ export default function Learn() {
           <Card key={k}><h3>{s.title}</h3><p>{s.strategy}</p></Card>
         ))}
       </div>
+
+      <h2>How day trading works here</h2>
+      <Card>
+        <ul className="plain">
+          <li><strong>15-minute bars:</strong> the day-trading account looks at prices in 15-minute slices (<Info term="bar15" />), not once a day.</li>
+          <li><strong>Two strategies:</strong> the <em>dip buyer</em> buys a stock that drops sharply below its short average, and the <Info term="breakout" /> strategy buys a stock that pushes above its <Info term="openingrange" />. Each has half the account.</li>
+          <li><strong>Flat before the close:</strong> every position is sold before the market closes, so nothing is held overnight.</li>
+          <li><strong>Cash account:</strong> a sale settles (<Info term="settlement" />) in one business day, so the money from a sale can fund buys on the next business day, not the same afternoon.</li>
+          <li><strong>Costs add up:</strong> every trade pays a little slippage (the simulator assumes 5 basis points a side), and more trades mean more of that cost. Trading often needs a bigger edge just to break even.</li>
+        </ul>
+      </Card>
 
       <h2>Safety rules</h2>
       <Card>

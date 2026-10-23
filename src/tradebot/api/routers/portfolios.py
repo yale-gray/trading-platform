@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated
 
@@ -31,7 +31,7 @@ from tradebot.db.models import (
     Portfolio,
     StrategyConfig,
 )
-from tradebot.runner.clock import has_bar, pause_end_bar
+from tradebot.runner.clock import has_bar, pause_end_bar, pause_end_bar_15m
 from tradebot.runner.state import PortfolioDef
 
 router = APIRouter(prefix="/portfolios", tags=["portfolios"])
@@ -68,13 +68,17 @@ def kill_switch_out(db: Session, p: Portfolio) -> KillSwitchOut:
     ks = repo.get_kill_switch(db, p.id)
     risk = json.loads(p.config_json)["engine"]["risk"]
     threshold = float(risk["kill_switch_drawdown"])
-    ends: date | None = None
+    ends: date | datetime | None = None
     if ks and ks.tripped and ks.tripped_at_bar:
-        ends = pause_end_bar(
-            PortfolioDef.from_json(p.config_json).markets(),
-            ks.tripped_at_bar.date(),
-            int(risk.get("kill_switch_pause_bars", 20)),
-        )
+        defn = PortfolioDef.from_json(p.config_json)
+        if defn.timeframe() == "15m":
+            ends = pause_end_bar_15m(ks.tripped_at_bar, int(risk.get("kill_switch_pause_bars", 20)))
+        else:
+            ends = pause_end_bar(
+                defn.markets(),
+                ks.tripped_at_bar.date(),
+                int(risk.get("kill_switch_pause_bars", 20)),
+            )
     return KillSwitchOut(
         pause_ends_after_bar=ends,
         tripped=bool(ks and ks.tripped),
@@ -172,15 +176,38 @@ def get_portfolio(db: Db, portfolio_id: int) -> PortfolioDetail:
     )
 
 
+def _as_datetime(asof: date | datetime) -> datetime:
+    """A ledger ``asof`` as a datetime: the bar-open timestamp (15m) or midnight of the date."""
+    return asof if isinstance(asof, datetime) else datetime(asof.year, asof.month, asof.day)
+
+
+def _bound(text: str) -> tuple[datetime, bool]:
+    """Parse a ``from``/``to`` value into a naive UTC datetime; True when it was a bare date."""
+    try:
+        if len(text) == 10:
+            d = date.fromisoformat(text)
+            return datetime(d.year, d.month, d.day), True
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        raise HTTPException(422, f"bad date/time {text!r}") from None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(UTC).replace(tzinfo=None)
+    return dt, False
+
+
 @router.get("/{portfolio_id}/equity", response_model=list[EquityPoint])
 def get_equity(
     db: Db,
     portfolio_id: int,
-    from_: Annotated[date | None, Query(alias="from")] = None,
-    to: date | None = None,
+    from_: Annotated[str | None, Query(alias="from")] = None,
+    to: str | None = None,
     sleeve: str | None = None,
 ) -> list[EquityPoint]:
-    """Equity series (total, or one sleeve) with write-time drawdown and benchmark equity."""
+    """Equity series (total, or one sleeve) with write-time drawdown and benchmark equity.
+
+    ``from``/``to`` take a date (``to`` is inclusive of that whole day) or, for 15m portfolios, a
+    UTC timestamp (``2024-01-08T14:30:00``; both ends inclusive). Points carry bar-open ``ts``.
+    """
     p = require_portfolio(db, portfolio_id)
     assert p.id is not None
     sleeve_id = TOTAL
@@ -192,10 +219,12 @@ def get_equity(
         EquitySnapshot.portfolio_id == p.id, EquitySnapshot.sleeve_id == sleeve_id
     )
     if from_ is not None:
-        stmt = stmt.where(EquitySnapshot.ts >= datetime(from_.year, from_.month, from_.day))
+        lo, _ = _bound(from_)
+        stmt = stmt.where(EquitySnapshot.ts >= lo)
     if to is not None:
+        hi, whole_day = _bound(to)
         stmt = stmt.where(
-            EquitySnapshot.ts < datetime(to.year, to.month, to.day) + timedelta(days=1)
+            EquitySnapshot.ts < hi + timedelta(days=1) if whole_day else EquitySnapshot.ts <= hi
         )
     bench_name = json.loads(p.config_json).get("benchmark")
     bench_markets: list[str] | None = None  # None: benchmark portfolio absent -> always expected
@@ -287,7 +316,7 @@ def get_trades(
         o = orders.get(r.order_id or "")
         items.append(
             TradeOut(
-                ts=datetime(r.asof.year, r.asof.month, r.asof.day),
+                ts=_as_datetime(r.asof),
                 sleeve_key=r.sleeve_key,
                 symbol=r.symbol or "",
                 side=r.side or "",

@@ -1,5 +1,5 @@
-import { longDate, money, qty, shortDate } from "./format";
-import type { Trade } from "./types";
+import { clockTime, longDate, money, qty, shortDate } from "./format";
+import type { Portfolio, Trade } from "./types";
 
 const CRYPTO = /-|\//;
 
@@ -44,3 +44,33 @@ export const KILL_SWITCH_BLURB = (until: Date | null, dd: number | null, thresho
     ? `Buying paused until about ${longDate(until)} after a ${drop} drop. Selling still works.`
     : `Buying is paused after a ${drop} drop. Selling still works.`;
 };
+
+/** The day-trading account is the fund named daytrading (the backend default is day_trading). */
+export const isDayTrading = (p: Pick<Portfolio, "name">): boolean => p.name.replace(/_/g, "").toLowerCase() === "daytrading";
+
+/** "Bought 2.4 shares of NVDA at $182.10 at 10:45 am". Date-only timestamps fall back to the day. */
+export function dayTradeSentence(t: Pick<Trade, "side" | "qty" | "symbol" | "price" | "ts">): string {
+  const buy = t.side.toUpperCase().startsWith("B");
+  const n = Number(t.qty);
+  const what = `${qty(t.qty)} ${n === 1 ? "share" : "shares"} of ${t.symbol}`;
+  const clock = clockTime(t.ts);
+  const when = clock ? `at ${clock}` : `on ${shortDate(t.ts)}`;
+  return `${buy ? "Bought" : "Sold"} ${what} at ${money(t.price)} ${when}`;
+}
+
+export const DAY_STRATEGIES: Record<string, { title: string; does: string; strategy: string }> = {
+  dip: {
+    title: "Dip buyer",
+    does: "Buys S&P 500 stocks that drop sharply below their recent average while the short-term trend is still up.",
+    strategy:
+      "Watches 15-minute bars. When a stock dips well below its own short average but its short trend is still up, it buys. It sells when the price snaps back to the average, on a trailing stop, or at the close. At most five positions at once.",
+  },
+  breakout: {
+    title: "Breakout",
+    does: "Buys S&P 500 stocks that push above the high of their first hour of trading on heavier-than-usual volume.",
+    strategy:
+      "Marks each stock's first-hour high (the opening range). When a stock closes above that high on above-average volume it buys, and sells on a trailing stop, if it falls back below the level, or at the close. At most five positions at once.",
+  },
+};
+
+export const DAY_NOTE = "Buys and sells within the same day. Everything is sold before the 4 pm close.";

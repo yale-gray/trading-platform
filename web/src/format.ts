@@ -79,3 +79,20 @@ export function nextRunLocal(ts: string | null | undefined): string | null {
   if (Number.isNaN(d.getTime())) return null;
   return d.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
+
+/** "10:45 am" in the viewer's local time, or null when the timestamp is date-only (midnight UTC). */
+export function clockTime(ts: string): string | null {
+  const d = parseTs(ts);
+  if (Number.isNaN(d.getTime())) return null;
+  const dateOnly = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0;
+  if (dateOnly) return null;
+  return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).replace(/\s+/g, " ").toLowerCase();
+}
+
+/** Calendar day key ("2026-10-22"): local day for full timestamps, UTC day for date-only values. */
+export function dayKey(ts: string | Date): string {
+  const d = typeof ts === "string" ? parseTs(ts) : ts;
+  const dateOnly = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0;
+  if (dateOnly) return d.toISOString().slice(0, 10);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}

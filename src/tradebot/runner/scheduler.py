@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import signal
 import threading
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from types import FrameType
 from zoneinfo import ZoneInfo
 
@@ -28,6 +28,7 @@ from tradebot.data import MarketData
 from tradebot.data.config import DataConfig
 from tradebot.db import create_all, make_engine, repo, session_scope
 from tradebot.logging_config import configure_logging
+from tradebot.runner.clock import INTRADAY_DELAY_MIN, session_bounds
 from tradebot.runner.lock import RunnerLock, lock_path
 from tradebot.runner.tick import Runner
 
@@ -41,6 +42,7 @@ JOB_IDS = (
     "equity_retry",
     "crypto_close",
     "crypto_retry",
+    "intraday_bar",
     "heartbeat",
 )
 
@@ -53,10 +55,31 @@ def _equity_retry_window(now: datetime) -> bool:
     return local.weekday() < 5 and (local.hour, local.minute) >= (16, 35)
 
 
+def _intraday_window(now: datetime) -> bool:
+    """True during an XNYS session's tick window (early closes respected).
+
+    From the first bar's completion (open + 15 min + 1 min) to 15 minutes after the close, so a
+    late or retried fire still collects the last bar (it is due at close + 1 min). The cron
+    trigger fires at :01/:16/:31/:46 every hour 09-16 New York; this guard drops the rest.
+    """
+    now = now.astimezone(UTC)
+    bounds = session_bounds(now.astimezone(NY).date())
+    if bounds is None:
+        return False
+    open_, close = bounds
+    first = open_ + timedelta(minutes=15 + INTRADAY_DELAY_MIN)
+    return first <= now <= close + timedelta(minutes=15)
+
+
+def intraday_trigger() -> CronTrigger:
+    """Bar open + 15 min + 1 min for 15m bars: :01, :16, :31, :46 on weekdays, 09-16 New York."""
+    return CronTrigger(day_of_week="mon-fri", hour="9-16", minute="1,16,31,46", timezone=NY)
+
+
 def build_scheduler(
     runner: Runner, scheduler: BaseScheduler | None = None, *, clock: Clock | None = None
 ) -> BaseScheduler:
-    """Register the six jobs on ``scheduler`` (a new ``BlockingScheduler`` by default)."""
+    """Register the seven jobs on ``scheduler`` (a new ``BlockingScheduler`` by default)."""
     sched = scheduler or BlockingScheduler(timezone="UTC")
     clk = clock or runner.clock
     common = {"misfire_grace_time": MISFIRE_GRACE_S, "coalesce": True, "max_instances": 1}
@@ -68,6 +91,10 @@ def build_scheduler(
     def equity_retry() -> None:
         if _equity_retry_window(clk.now()):
             runner.tick(scope="equity")
+
+    def intraday_bar() -> None:
+        if _intraday_window(clk.now()):
+            runner.tick(scope="intraday")
 
     sched.add_job(runner.tick, DateTrigger(), id="startup_catchup", **common)
     sched.add_job(
@@ -92,6 +119,7 @@ def build_scheduler(
         kwargs={"scope": "crypto"},
         **common,
     )
+    sched.add_job(intraday_bar, intraday_trigger(), id="intraday_bar", **common)
     sched.add_job(heartbeat, IntervalTrigger(minutes=5), id="heartbeat", **common)
     return sched
 

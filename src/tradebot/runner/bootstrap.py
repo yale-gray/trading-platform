@@ -461,8 +461,10 @@ def reset_kill_switch(
 class ResetFromResult(NamedTuple):
     """What :func:`reset_from` did."""
 
-    skipped_after: date
+    skipped_after: date | datetime
     cancelled_orders: list[str]
+    open_positions: list[str] = []
+    """Symbols still held at the reset (15m portfolios only; the first resumed session flattens)."""
 
 
 def reset_from(
@@ -475,12 +477,23 @@ def reset_from(
     the next bar), write a checkpoint labelled ``resume - 1 day`` with the otherwise unchanged
     engine state, advance ``runner_state`` to it and log the override in ``run_log``.
     Refuses a ``resume`` in the future (per ``now``) or not after the last processed bar.
+
+    15m portfolios (ADR-0001 A21): ``resume`` is a **session date** and the next bar processed is
+    that session's first bar (09:30 New York). The checkpoint is labelled one bar earlier
+    (``open - 15 min``), a label that is never a real bar. ``resume`` must be an XNYS session
+    after the last processed bar's session (a weekend or holiday is refused, naming the next
+    session). A sub-day timestamp is not accepted (the CLI takes a date only): a gap is always
+    skipped up to a session boundary so a session is never half-processed. Positions held at the
+    reset are kept (reported in the result); the engine flattens them at the close of the first
+    resumed session like any other (the gap itself is never traded).
     """
+    from tradebot.runner.clock import session_bounds
     from tradebot.sim.orders import OrderStatus
 
     now_utc = repo.naive_utc(now)
     if resume > now_utc.date():
         raise RunnerError(f"DATE {resume} is in the future (today is {now_utc.date()})")
+    bounds = session_bounds(resume)
     label = datetime(resume.year, resume.month, resume.day) - timedelta(days=1)
     with session_scope(db) as s:
         p = repo.get_portfolio(s, portfolio_name)
@@ -489,17 +502,30 @@ def reset_from(
         rs = repo.get_runner_state(s, p.id)
         if rs.last_processed_bar_ts is None:
             raise RunnerError("portfolio has not processed any bar; recreate it with --start DATE")
-        if label <= rs.last_processed_bar_ts:
+        ctx = restore_context(s, p)
+        intraday = ctx.defn.timeframe() == "15m"
+        if intraday:
+            if bounds is None:
+                nxt = resume + timedelta(days=1)
+                while session_bounds(nxt) is None:
+                    nxt += timedelta(days=1)
+                raise RunnerError(
+                    f"{resume} is not an XNYS session; a 15m reset resumes at a session's "
+                    f"first bar (next session: {nxt})"
+                )
+            label = bounds[0].replace(tzinfo=None) - timedelta(minutes=15)
+            if label <= rs.last_processed_bar_ts:
+                raise RunnerError(
+                    "DATE must be a session after the last processed bar "
+                    f"{rs.last_processed_bar_ts.isoformat()}"
+                )
+        elif label <= rs.last_processed_bar_ts:
             raise RunnerError(
                 f"DATE must be after the last processed bar {rs.last_processed_bar_ts.date()}"
             )
-        ctx = restore_context(s, p)
-        if ctx.defn.timeframe() == "15m":
-            raise RunnerError(
-                "reset-from is not supported for 15m portfolios yet (ADR-0001 A21 follow-up)"
-            )
         asof = ctx.engine.last_processed_asof
         assert asof is not None
+        held = sorted({pos.symbol for sl in ctx.engine.snapshot().sleeves for pos in sl.positions})
         cancelled = [
             ctx.engine.cancel_order(o.order_id)
             for o in ctx.engine.orders()
@@ -539,4 +565,4 @@ def reset_from(
         rs = repo.get_runner_state(s, p.id)
         rs.last_processed_bar_ts = label
         s.add(rs)
-    return ResetFromResult(asof, [o.order_id for o in cancelled])
+    return ResetFromResult(asof, [o.order_id for o in cancelled], held)

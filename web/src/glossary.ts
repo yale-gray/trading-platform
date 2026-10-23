@@ -18,4 +18,9 @@ export const GLOSSARY: Record<string, { term: string; text: string }> = {
   sortino: { term: "Sortino ratio", text: "Return earned per unit of downside risk. Higher is better." },
   sharpe: { term: "Sharpe ratio", text: "Return earned per unit of overall ups and downs. Higher is better." },
   daytrading: { term: "Day trading", text: "Buying and selling within the same day, holding nothing overnight." },
+  intraday: { term: "Intraday", text: "Happening within a single trading day, from the open to the close." },
+  bar15: { term: "15-minute bar", text: "A summary of one 15-minute slice of trading: its first, highest, lowest and last price, plus how much was traded." },
+  settlement: { term: "Settlement", text: "The time it takes for a sale to turn into cash you can use again. Here it is one business day, so sale money can fund the next day's buys." },
+  breakout: { term: "Breakout", text: "A price rising above a level it has been stuck below, which some traders read as the start of a new move." },
+  openingrange: { term: "Opening range", text: "The high and low of the first hour of trading. The breakout strategy watches for a close above the first-hour high." },
 };

@@ -4,6 +4,7 @@ import { Sparkline } from "../components/charts";
 import { Card, Delta, Empty, ErrorNote, Info, Loading, PctDelta, money } from "../components/ui";
 import { pctSeries, todayChange } from "../equity";
 import { ago, longDate, nextRunLocal, pauseEnd } from "../format";
+import { isDayTrading } from "../copy";
 import type { EquityPoint, Portfolio, PortfolioDetail, RunnerStatus } from "../types";
 
 export type Attention = { key: string; text: string; to?: string };
@@ -50,7 +51,8 @@ function AccountCard({ p }: { p: Portfolio }) {
 export default function Home() {
   const ports = useApi<Portfolio[]>("/portfolios");
   const runner = useApi<RunnerStatus>("/runner/status");
-  const funds = (ports.data ?? []).filter((p) => p.kind === "fund");
+  const funds = (ports.data ?? []).filter((p) => p.kind === "fund" && !isDayTrading(p));
+  const dayAcct = (ports.data ?? []).find((p) => p.kind === "fund" && isDayTrading(p));
   const fund = funds[0];
   const detail = useApi<PortfolioDetail>(fund ? `/portfolios/${fund.id}` : null);
   const eq = useApi<EquityPoint[]>(fund ? `/portfolios/${fund.id}/equity` : null);
@@ -69,8 +71,17 @@ export default function Home() {
           {funds.map((p) => <AccountCard key={p.id} p={p} />)}
           <Link to="/day-trading" className="card account link">
             <div className="label">Day Trading</div>
-            <div className="big num">{money("10000")}</div>
-            <div className="muted small">Not started yet. Waiting for a market-data key.</div>
+            {dayAcct ? (
+              <>
+                <div className="big num">{money(dayAcct.equity)}</div>
+                <div className="muted small">Since start: <PctDelta value={dayAcct.total_return_pct} /></div>
+              </>
+            ) : (
+              <>
+                <div className="big num">{money("10000")}</div>
+                <div className="muted small">Not created yet. Buys and sells within the same day.</div>
+              </>
+            )}
           </Link>
         </div>
       )}

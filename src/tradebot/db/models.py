@@ -5,7 +5,9 @@ Conventions
 * Money, quantities, prices and ratios are ``TEXT`` holding the canonical ``str(Decimal)``
   of the engine value (no second rounding layer). Never ``int`` / ``float`` columns.
 * Bar and event timestamps are UTC, stored timezone-naive (``bar_ts`` is the bar's UTC
-  midnight label). ``asof`` columns are plain dates.
+  midnight label). ``asof`` columns (``AsOfType``) hold a plain date for a daily bar (stored
+  as ``YYYY-MM-DD``, unchanged) and the full naive-UTC bar-open timestamp for a 15m bar
+  (ADR-0001 A21), so one column type serves both.
 * The ledger plus the latest ``engine_checkpoint`` are the source of truth; every other
   table exists so the API can read quickly.
 * Deviation from the spec text: ``order`` is keyed by ``(portfolio_id, order_id)`` (the
@@ -15,16 +17,46 @@ Conventions
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
+from typing import Any
 
 from pydantic import NaiveDatetime
-from sqlalchemy import Column, Text, UniqueConstraint
+from sqlalchemy import Column, String, Text, TypeDecorator, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 SCHEMA_VERSION = 1
 
+
+class AsOfType(TypeDecorator[Any]):
+    """A ``date`` (daily bar) or a ``datetime`` (15m bar open, stored as naive UTC).
+
+    Text storage: ``2024-01-02`` for a date, ``2024-01-02T14:30:00`` for a timestamp, so rows
+    stay readable, sort chronologically and a column created as ``DATE`` by the old schema
+    reads back unchanged (SQLite does not enforce declared types).
+    """
+
+    impl = String
+    cache_ok = True
+
+    def process_bind_param(self, value: Any, dialect: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            if value.tzinfo is not None:
+                value = value.astimezone(UTC).replace(tzinfo=None)
+            return value.isoformat(timespec="seconds")
+        return value.isoformat()
+
+    def process_result_value(self, value: Any, dialect: Any) -> date | datetime | None:
+        if value is None:
+            return None
+        text = str(value)
+        return date.fromisoformat(text) if len(text) == 10 else datetime.fromisoformat(text)
+
+
 __all__ = [
     "SCHEMA_VERSION",
+    "AsOfType",
     "BacktestEquityPoint",
     "BacktestRun",
     "BacktestTrade",
@@ -169,8 +201,8 @@ class OrderRow(SQLModel, table=True):
     qty_requested: str
     qty_accepted: str | None = None
     qty_filled: str
-    created_asof: date  # signal bar
-    fill_asof: date | None = None
+    created_asof: date | datetime = Field(sa_column=Column(AsOfType, nullable=False))  # signal bar
+    fill_asof: date | datetime | None = Field(default=None, sa_column=Column(AsOfType))
     ref_price: str | None = None
     fill_price: str | None = None
     fee: str | None = None
@@ -190,7 +222,7 @@ class LedgerEventRow(SQLModel, table=True):
     seq: int
     sleeve_id: int | None = Field(default=None, foreign_key="sleeve.id")
     sleeve_key: str
-    asof: date
+    asof: date | datetime = Field(sa_column=Column(AsOfType, nullable=False))
     stage: str
     type: str
     order_id: str | None = None
@@ -218,7 +250,7 @@ class PositionSnapshot(SQLModel, table=True):
     unrealized: str
     highest_close: str | None = None
     stop_level: str | None = None
-    entry_asof: date | None = None
+    entry_asof: date | datetime | None = Field(default=None, sa_column=Column(AsOfType))
 
 
 class EquitySnapshot(SQLModel, table=True):

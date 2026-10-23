@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { post, useApi } from "../api";
 import { LineChart } from "../components/charts";
 import { Card, Empty, ErrorNote, Loading, PctDelta, Stat, Delta, money } from "../components/ui";
-import { KILL_SWITCH_BLURB, SECTIONS } from "../copy";
+import { KILL_SWITCH_BLURB, SECTIONS, isDayTrading } from "../copy";
 import { RANGES, filterRange, pctSeries, type Range } from "../equity";
 import { pauseEnd, pct } from "../format";
 import type { EquityPoint, KillSwitch, Portfolio, PortfolioDetail } from "../types";
@@ -31,7 +31,7 @@ export function KillSwitchNote({ pid, ks, onAck }: { pid: number; ks: KillSwitch
 
 export default function Investing() {
   const ports = useApi<Portfolio[]>("/portfolios");
-  const funds = (ports.data ?? []).filter((p) => p.kind === "fund");
+  const funds = (ports.data ?? []).filter((p) => p.kind === "fund" && !isDayTrading(p));
   const [sel, setSel] = useState<number | null>(null);
   const pid = sel ?? funds[0]?.id ?? null;
   const detail = useApi<PortfolioDetail>(pid ? `/portfolios/${pid}` : null);

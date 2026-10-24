@@ -407,6 +407,7 @@ def test_reason_is_enum_with_spec_codes_and_rejects_unknown_text() -> None:
         "KILL_SWITCH", "NO_DATA", "NO_VOL_DATA", "STOP_LOCK", "MAX_ASSET_SHRUNK",
         "MAX_ASSET", "MAX_CRYPTO_SHRUNK", "MAX_CRYPTO", "CASH_SHRUNK",
         "BELOW_MIN_SIZE", "SHRUNK_CASH", "INSUFFICIENT_CASH", "FLATTEN_NO_BAR", "FLATTEN_LATE",
+        "DELIST_NO_BAR",
     }  # fmt: skip
     pending = _order_in(OrderStatus.PENDING)
     assert transition(pending, OrderStatus.REJECTED, reason="MAX_ASSET").reason is (

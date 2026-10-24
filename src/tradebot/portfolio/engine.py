@@ -390,6 +390,7 @@ class PortfolioEngine:
         session_end: bool = False,
         lean: bool = False,
         late_flatten: bool = False,
+        delisted: Mapping[str, bool] | None = None,
     ) -> BarResult:
         """Run steps A-F for bar ``asof``. Raises ``StaleBarError`` if ``asof`` does not advance.
 
@@ -400,9 +401,15 @@ class PortfolioEngine:
         ``late_flatten``: an earlier session's positions are still open (its last bar never came):
         with ``intraday_flatten`` they are sold at this bar's open before anything else
         (:meth:`flatten_late`, flagged ``FLATTEN_LATE``).
+        ``delisted`` (A33 B1, honoured only with ``config.force_sell_missing``): held symbols the
+        driver found without a bar on this daily bar, mapped to "write off" (sold at ~0) or not.
         """
         with money_context():
-            return self._process_bar(asof, bars, session_end, lean, late_flatten)
+            return self._process_bar(asof, bars, session_end, lean, late_flatten, delisted)
+
+    def held_symbols(self) -> list[str]:
+        """Symbols with an open position in any sleeve, sorted."""
+        return sorted({sym for book in self._ledger.state_view.positions.values() for sym in book})
 
     def _lean_bars(self, bars: Mapping[str, Bar]) -> dict[str, Bar]:
         """The bars of held and pending-order symbols (the only ones step A-D can touch)."""
@@ -443,6 +450,7 @@ class PortfolioEngine:
         session_end: bool,
         lean: bool,
         late_flatten: bool = False,
+        delisted: Mapping[str, bool] | None = None,
     ) -> BarResult:
         if self._last_asof is not None and asof <= self._last_asof:
             raise StaleBarError(f"asof {asof} is not after last processed {self._last_asof}")
@@ -492,6 +500,20 @@ class PortfolioEngine:
         if session_end and self._config.intraday_flatten:
             fr = self._flatten(asof, prev_asof)
             flat_fills, flat_rejected, flat_cancelled = fr.fills, fr.rejected, fr.expired
+        delist_fills: list[Order] = []
+        delist_rejected: list[Order] = []
+        delist_cancelled: list[Order] = []
+        if delisted and self._config.force_sell_missing and prev_asof is not None:
+            held = set(self.held_symbols())
+            gone = {s: w for s, w in delisted.items() if s in held and s not in self._fresh}
+            if gone:
+                dr = self._broker.force_sell_missing(
+                    asof,
+                    {s: self._last_close[s] for s in sorted(gone)},
+                    prev_asof,
+                    write_off=[s for s, w in gone.items() if w],
+                )
+                delist_fills, delist_rejected, delist_cancelled = dr.fills, dr.rejected, dr.expired
         # C: rebalance transfers for a plan decided on an earlier bar.
         if self._plan is not None:
             tr = execute_transfers(
@@ -550,15 +572,15 @@ class PortfolioEngine:
             snap = self._make_snapshot(asof)
         return BarResult(
             asof=asof,
-            fills=late_fills + fill_result.fills + flat_fills,
+            fills=late_fills + fill_result.fills + flat_fills + delist_fills,
             stop_orders=stop_orders,
             expired=fill_result.expired,
             new_ledger_events=list(self._ledger.events[n_before:]),
             snapshot=snap,
             kill_switch_tripped=obs.tripped_now,
             rebalance_planned=planned,
-            rejected=late_rejected + fill_result.rejected + flat_rejected,
-            cancelled=late_cancelled + cancelled + flat_cancelled,
+            rejected=late_rejected + fill_result.rejected + flat_rejected + delist_rejected,
+            cancelled=late_cancelled + cancelled + flat_cancelled + delist_cancelled,
         )
 
     def _flatten(self, asof: AsOf, prev_asof: AsOf | None) -> FillResult:

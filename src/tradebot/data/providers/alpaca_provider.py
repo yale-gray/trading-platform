@@ -1,4 +1,4 @@
-"""US equity 15-minute bars from the Alpaca **market data** API (ADR-0001 A21).
+"""US equity 15-minute and daily bars from the Alpaca **market data** API (ADR-0001 A21, A32).
 
 Data only: the sole host is ``https://data.alpaca.markets`` and the sole endpoint is
 ``/v2/stocks/bars``. There is no trading, account or order code anywhere in this module.
@@ -10,7 +10,12 @@ Data only: the sole host is ``https://data.alpaca.markets`` and the sole endpoin
   caller must not splice them into one cached series.
 * Symbols: Alpaca spells share classes with a dot, exactly like our canonical form
   (``BRK.B``, ``BF.B``), so no translation is needed (unlike Yahoo's ``BRK-B``).
-* Output: the canonical frame (``open, high, low, close, volume`` as float64, UTC index named
+* Daily bars (``Timeframe.D1``, A32) are a fetch source for delisted / removed S&P 500 names that
+  yfinance no longer serves. They use the same ``adjustment=all`` (splits + dividends, i.e. total
+  return, like the yfinance adjusted basis) and are labelled with the New York session date at
+  00:00 UTC, like the yfinance daily frames. ``MarketData`` does not route to this provider; the
+  ``tradebot.data.pit_prices`` helper writes its frames into the normal cache.
+* Output (15m): the canonical frame (``open, high, low, close, volume`` as float64, UTC index named
   ``ts`` at bar **open**), regular session only (extended-hours bars are dropped), and only
   bars complete at the injected ``Clock``'s now (``open + 15 min <= now``).
 * Rate limit: a token bucket (default 180 requests/min, under Alpaca's 200). HTTP 429 and
@@ -33,6 +38,7 @@ from urllib.parse import urlsplit
 import pandas as pd
 
 from tradebot.clock import Clock, SystemClock
+from tradebot.data.calendar import last_closed_bar_date
 from tradebot.data.errors import ProviderError
 from tradebot.data.intraday import bar_opens, complete_mask, session_close_time
 from tradebot.data.symbols import asset_class
@@ -42,7 +48,7 @@ log = logging.getLogger(__name__)
 
 DATA_HOST = "data.alpaca.markets"
 BARS_URL = f"https://{DATA_HOST}/v2/stocks/bars"
-_TIMEFRAMES = {"15m": "15Min"}
+_TIMEFRAMES = {"15m": "15Min", "1d": "1Day"}
 _MAX_BODY_CHARS = 200
 _FORBIDDEN_HOST_PARTS = ("paper-api", "api.alpaca.markets", "broker", "trading")
 
@@ -187,7 +193,7 @@ class AlpacaProvider:
         end: date,
         timeframe: Timeframe = Timeframe.M15,
     ) -> pd.DataFrame:
-        """Complete regular-session 15m bars whose New York session date is in [start, end]."""
+        """Complete regular-session bars whose New York session date is in [start, end]."""
         return self.fetch_many([symbol], start, end, timeframe)[symbol]
 
     def fetch_many(
@@ -198,7 +204,7 @@ class AlpacaProvider:
         timeframe: Timeframe = Timeframe.M15,
     ) -> dict[Symbol, pd.DataFrame]:
         """Like :meth:`fetch_bars` for many symbols via multi-symbol paginated requests."""
-        if timeframe is not Timeframe.M15:
+        if timeframe not in (Timeframe.M15, Timeframe.D1):
             raise ProviderError(f"{self.name}: unsupported timeframe {timeframe}")
         unique = list(dict.fromkeys(symbols))
         for symbol in unique:
@@ -206,6 +212,8 @@ class AlpacaProvider:
                 raise ProviderError(f"{self.name}: unsupported symbol {symbol}")
         if not unique:
             return {}
+        if timeframe is Timeframe.D1:
+            return self._fetch_many_daily(unique, start, end)
         expected = bar_opens(start, end)
         if len(expected) == 0:
             return {s: _empty_frame() for s in unique}
@@ -226,6 +234,32 @@ class AlpacaProvider:
                 frame = _to_frame(raw.get(symbol), expected, self._clock.now())
                 if frame.empty:
                     message = f"{self.name}: no bars returned for {symbol}"
+                    log.warning(message)
+                    frame.attrs["provider_warnings"] = [message]
+                out[symbol] = frame
+        return out
+
+    def _fetch_many_daily(
+        self, unique: list[Symbol], start: date, end: date
+    ) -> dict[Symbol, pd.DataFrame]:
+        """Closed daily bars, session date in [start, end], split- and dividend-adjusted."""
+        if end < start:
+            return {s: _empty_frame() for s in unique}
+        now = pd.Timestamp(self._clock.now())
+        req_start = pd.Timestamp(start, tz="UTC")
+        req_end = pd.Timestamp(end, tz="UTC") + pd.Timedelta(days=1)
+        if self._sip_delay_min:
+            req_end = min(req_end, now - pd.Timedelta(minutes=self._sip_delay_min))
+        if req_end <= req_start:
+            return {s: _empty_frame() for s in unique}
+        out: dict[Symbol, pd.DataFrame] = {}
+        for i in range(0, len(unique), self._symbols_per_request):
+            group = unique[i : i + self._symbols_per_request]
+            raw = self._fetch_group(group, req_start, req_end, "1Day")
+            for symbol in group:
+                frame = _to_daily_frame(raw.get(symbol), symbol, start, end, self._clock.now())
+                if frame.empty:
+                    message = f"{self.name}: no daily bars returned for {symbol}"
                     log.warning(message)
                     frame.attrs["provider_warnings"] = [message]
                 out[symbol] = frame
@@ -253,12 +287,16 @@ class AlpacaProvider:
         return text
 
     def _fetch_group(
-        self, group: list[Symbol], start: pd.Timestamp, end: pd.Timestamp
+        self,
+        group: list[Symbol],
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+        tf_param: str | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
         """All pages for one multi-symbol request window -> per-symbol raw bar dicts."""
         params: dict[str, Any] = {
             "symbols": ",".join(group),
-            "timeframe": self._tf_param,
+            "timeframe": tf_param or self._tf_param,
             "start": start.tz_convert("UTC").strftime("%Y-%m-%dT%H:%M:%SZ"),
             "end": end.tz_convert("UTC").strftime("%Y-%m-%dT%H:%M:%SZ"),
             "adjustment": "all",
@@ -368,5 +406,38 @@ def _to_frame(
     frame.index = frame.index.as_unit("ns")
     frame = frame[frame.index.isin(expected)]  # drops pre/post-market bars
     frame = frame[complete_mask(frame.index, now)]  # drops the in-progress bar
+    frame = frame[~frame.index.duplicated(keep="last")].sort_index()
+    return frame.astype(float)
+
+
+def _to_daily_frame(
+    rows: list[dict[str, Any]] | None, symbol: Symbol, start: date, end: date, now: Any
+) -> pd.DataFrame:
+    """Canonical daily frame: New York session date at 00:00 UTC, closed bars, float64."""
+    if not rows:
+        return _empty_frame()
+    try:
+        raw = pd.DataFrame(rows)
+        stamp = pd.to_datetime(raw["t"], utc=True).dt.tz_convert("America/New_York")
+        labels = pd.DatetimeIndex(stamp.dt.tz_localize(None).dt.normalize(), name="ts")
+        frame = pd.DataFrame(
+            {
+                "open": raw["o"].to_numpy(dtype="float64"),
+                "high": raw["h"].to_numpy(dtype="float64"),
+                "low": raw["l"].to_numpy(dtype="float64"),
+                "close": raw["c"].to_numpy(dtype="float64"),
+                "volume": raw["v"].to_numpy(dtype="float64"),
+            },
+            index=labels.tz_localize("UTC"),
+            columns=list(BAR_COLUMNS),
+        )
+    except (KeyError, ValueError, TypeError):
+        raise ProviderError("alpaca: bar payload missing expected fields") from None
+    frame.index = frame.index.as_unit("ns")
+    upper = min(end, last_closed_bar_date(symbol, now))
+    frame = frame[
+        (frame.index >= pd.Timestamp(start, tz="UTC"))
+        & (frame.index <= pd.Timestamp(upper, tz="UTC"))
+    ]
     frame = frame[~frame.index.duplicated(keep="last")].sort_index()
     return frame.astype(float)

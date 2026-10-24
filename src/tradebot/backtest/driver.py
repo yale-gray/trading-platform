@@ -471,6 +471,28 @@ class BarDriver:
                 out[sym] = bar
         return out
 
+    def _delisted_at(self, ts: pd.Timestamp) -> dict[str, bool]:
+        """Held symbols without a bar on this daily master-calendar bar (A33 B1).
+
+        Maps each to its write-off flag: its last close is at least 50% below the close five
+        bars before its last bar. Empty unless ``EngineConfig.force_sell_missing`` is set;
+        never used by intraday runs. Causal: only past bars of the symbol are read.
+        """
+        cfg = getattr(self._engine, "config", None)
+        if self._intraday or not getattr(cfg, "force_sell_missing", False):
+            return {}
+        out: dict[str, bool] = {}
+        for sym in self._engine.held_symbols():
+            if self._row(sym, ts) >= 0 or sym not in self._ns:
+                continue
+            i = int(np.searchsorted(self._ns[sym], int(ts.value), side="right")) - 1
+            if i < 0:
+                continue
+            close = self._sym_arrays(sym)["close"]
+            ref = float(close[max(i - 5, 0)])
+            out[sym] = ref > 0 and float(close[i]) / ref - 1.0 <= -0.5
+        return out
+
     def step(self, ts: pd.Timestamp) -> StepResult:
         """Process ONE bar: engine first (fills), then signals and target submission."""
         ts = pd.Timestamp(ts)
@@ -479,13 +501,16 @@ class BarDriver:
         day = ts.date()
         asof: AsOf = ts.to_pydatetime() if self._intraday else day  # the only conversion (ADR D1)
         session_end = self._intraday and self.is_session_end(ts)
-        extra: dict[str, bool] = {}
+        extra: dict[str, Any] = {}
         if self._lean:
             extra["lean"] = True
         if session_end:
             extra["session_end"] = True
         if self._flatten and self._stale_session(ts):
             extra["late_flatten"] = True
+        delisted = self._delisted_at(ts)
+        if delisted:
+            extra["delisted"] = delisted
         result = self._engine.process_bar(asof, self._bars_at(ts), **extra)
         if session_end and self._flatten:
             # Positions were just sold at this close; buying now would carry overnight.

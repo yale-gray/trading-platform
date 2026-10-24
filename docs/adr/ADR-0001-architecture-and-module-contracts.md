@@ -374,6 +374,34 @@ The owner asked for prerequisites P1-P5 from `docs/research/dt-deep/00-summary.m
 
 **A31. T-bill edge correction (PM, 2026-10-23, found after the first Tier A run).** The A26 edge test subtracted the full daily T-bill rate every day, but the simulator's idle cash earns 0, so part-time strategies were charged interest they could never earn. The edge is now measured as if idle cash earned T-bills: `excess_t = r_t - rf_t * w_t`, where `w_t` is the fraction of equity invested at the start of day t (previous day's closing exposure). A strategy fully in cash has edge 0; a fully invested one is unchanged. The correction applies equally to every candidate; gate thresholds are unchanged.
 
+**A32. Point-in-time S&P 500 membership (owner decision 2026-10-23).** The goal is to re-test short-term reversal without survivorship bias, as a **new trial id** (`tA_st_reversal_pit`, trial 11 of 12). The parameters are unchanged from `tA_st_reversal`.
+
+- **Membership data:** `src/tradebot/data/universes/sp500_history.csv` gives, for each date, the constituents as of that date. It must cover 2015-01-01 onward. The source is a public, citable dataset (e.g. the fja05680/sp500 GitHub dataset, cross-checked against Wikipedia's "Selected changes" table). The file header records the source and the date retrieved.
+  - The loader `sp500_members(asof: date) -> frozenset[str]` uses the membership in force at the **close of the previous trading day**, so an index change effective on day d is only known from d on.
+- **Rule piece:** `{universe: sp500_member}` returns 1.0 on bars where the symbol is a member and 0.0 otherwise. It is daily and 15m, and causal.
+  - Entries combine it with `eq: [..., 1]`.
+  - A held stock that leaves the index is still sold by its normal exit; membership gates **entries only**.
+- **Price coverage:** the universe is every ticker that was a member at any point from 2015 on.
+  - Prices come from cached yfinance daily data where available. For removed or delisted names, the Alpaca daily (SIP) history is used where it exists.
+  - Ticker renames are mapped (e.g. FB→META) with a small committed alias table.
+  - A **coverage report** is mandatory: the share of member-days with a price, by year, plus the list of members with no data. Missing members keep some survivorship bias, and the write-up must state how much.
+
+**A33. Audit 009 decisions (PM, 2026-10-23, before any run of `tA_st_reversal_pit`).**
+
+**B1, delisted holdings.** In daily mode, a held symbol with no bar on a master-calendar bar, while other symbols do have bars, is force-sold in that step.
+- Price: its last close minus normal sell slippage, minus `FLATTEN_NO_BAR_EXTRA_BPS` (50 bp).
+- Write-off: if its close fell ≥ 50% over the 5 bars before its last bar, it is sold at 0 instead.
+- The fill is flagged `DELIST_NO_BAR`.
+- The rule is causal: it uses only "no bar today" and past closes. A one-day gap (a halt) triggers it too, which is conservative.
+- It applies only when an engine flag is set: `EngineConfig.force_sell_missing: bool = False`, omitted from serialisation at False, so goldens are unchanged. The PIT trial sets it to True.
+
+**M1/M2, cleaning the Alpaca-sourced daily series.**
+- Zero-volume bars with open = high = low = close are dropped.
+- Everything after the first run of 5 or more such filler bars is cut, because the ticker was reused by a different company.
+- Alpaca-sourced symbols with any one-day close move above 40% that coincides with a known corporate-action date or is not reversed are listed. The **verdict run excludes them**, and a sensitivity run including them is reported. The exclusion list is fixed before the run and recorded in the pre-registration.
+- The data quality check reports filler bars (it no longer just warns).
+- yfinance-sourced series are unchanged.
+
 ## Consequences
 - **One loop (`BarDriver`) and one engine** mean a backtest result and a paper result for the same bars must match exactly. SPEC-005 can test that directly.
 - **Synthetic fixtures** keep the public repo clean and the goldens stable, but CI never sees real market data. Real-data sanity checks are a manual, local step before any strategy passes the gate.

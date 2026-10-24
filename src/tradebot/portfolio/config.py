@@ -115,6 +115,9 @@ class EngineConfig(BaseModel):
     settlement: Literal["none", "t1"] = "none"
     # Tiered costs (ADR-0001 A23); omitted from the serialised config at "flat".
     cost_profile: CostProfile = "flat"
+    # Delisted holdings (ADR-0001 A33 B1): in daily mode a held symbol with no bar while other
+    # symbols have bars is force-sold in that step. Omitted from the serialised config at False.
+    force_sell_missing: bool = False
 
     @model_serializer(mode="wrap")
     def _omit_default_flags(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
@@ -125,6 +128,8 @@ class EngineConfig(BaseModel):
             data.pop("settlement", None)
         if self.cost_profile == "flat":
             data.pop("cost_profile", None)
+        if not self.force_sell_missing:
+            data.pop("force_sell_missing", None)
         return data
 
     @field_validator("equity_qty_quantum", mode="before")

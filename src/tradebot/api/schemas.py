@@ -90,7 +90,9 @@ class RoundTripOut(BaseModel):
     fees: Money
     pnl: Money  # after fees
     pnl_pct: float  # pnl / (qty * entry_price), in percent
-    exit_reason: Literal["signal", "stop", "rebalance", "manual", "flatten", "flatten_no_bar"]
+    exit_reason: Literal[
+        "signal", "stop", "rebalance", "manual", "flatten", "flatten_no_bar", "delist_no_bar"
+    ]
 
 
 class RoundTripPage(BaseModel):

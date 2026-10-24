@@ -22,7 +22,7 @@ from tradebot.portfolio.config import EngineConfig
 from tradebot.portfolio.cost_tiers import tier_extra_fee_bps, tier_slip_bps
 from tradebot.portfolio.ledger import LedgerError
 from tradebot.portfolio.models import Dec, FillSide, LedgerEvent, PortfolioSnapshot, Stage
-from tradebot.portfolio.money import buy_qty, money_context, qty_quantum, to_price
+from tradebot.portfolio.money import PRICE_Q, buy_qty, money_context, qty_quantum, to_price
 from tradebot.portfolio.portfolio import Portfolio
 from tradebot.sim import costs
 from tradebot.sim.orders import (
@@ -348,6 +348,54 @@ class SimBroker:
             asof=asof, fills=fills, rejected=rejected, expired=cancelled, new_ledger_events=events
         )
 
+    def force_sell_missing(
+        self,
+        asof: AsOf,
+        closes: Mapping[str, Decimal],
+        submitted: AsOf,
+        *,
+        write_off: Collection[str] = (),
+    ) -> FillResult:
+        """Daily delisting exit (ADR-0001 A33 B1): sell every position of the symbols in ``closes``.
+
+        Pending orders of those symbols are cancelled. Each position is sold in full at the
+        symbol's last close minus the normal sell slippage and ``FLATTEN_NO_BAR_EXTRA_BPS``;
+        a symbol in ``write_off`` is sold at the smallest price on the grid (1e-8, i.e. zero).
+        Fills carry the ``DELIST_NO_BAR`` flag and reason.
+        """
+        syms = set(closes)
+        cancelled = [self.cancel_order(o.order_id) for o in self.pending_orders if o.symbol in syms]
+        state = self.portfolio.ledger.state_view
+        reqs = [
+            OrderRequest(
+                sleeve_id=sid, symbol=sym, side=Side.SELL, qty=pos.qty, origin=OrderOrigin.FLATTEN
+            )
+            for sid in sorted(state.positions)
+            for sym, pos in sorted(state.positions[sid].items())
+            if sym in syms
+        ]
+        dead = set(write_off)
+        fills: list[Order] = []
+        rejected: list[Order] = []
+        events: list[LedgerEvent] = []
+        for order in self.submit_orders(reqs, submitted):
+            done, evs = self._fill(
+                order,
+                asof,
+                closes[order.symbol],
+                Stage.CLOSE,
+                extra_sell_slip_bps=FLATTEN_NO_BAR_EXTRA_BPS,
+                flag="DELIST_NO_BAR",
+                reason=OrderReason.DELIST_NO_BAR,
+                fixed_price=PRICE_Q if order.symbol in dead else None,
+            )
+            self._finish(done)
+            events.extend(evs)
+            (fills if done.status is OrderStatus.FILLED else rejected).append(done)
+        return FillResult(
+            asof=asof, fills=fills, rejected=rejected, expired=cancelled, new_ledger_events=events
+        )
+
     def _fill(
         self,
         order: Order,
@@ -358,6 +406,7 @@ class SimBroker:
         extra_sell_slip_bps: Decimal | None = None,
         flag: str | None = None,
         reason: OrderReason | None = None,
+        fixed_price: Decimal | None = None,
     ) -> tuple[Order, list[LedgerEvent]]:
         ac = self._asset_class_of(order.symbol)
         cost = self._config.costs[ac]
@@ -378,7 +427,11 @@ class SimBroker:
                 )
                 reason = OrderReason.SHRUNK_CASH
         else:
-            price = costs.sell_fill_price(open_price, slip_bps + (extra_sell_slip_bps or 0))
+            price = (
+                fixed_price
+                if fixed_price is not None
+                else costs.sell_fill_price(open_price, slip_bps + (extra_sell_slip_bps or 0))
+            )
             pos = state.positions.get(order.sleeve_id, {}).get(order.symbol)
             held = pos.qty if pos is not None else Decimal(0)
             qty = min(qty, held)  # defensive; submit_orders already checks holdings

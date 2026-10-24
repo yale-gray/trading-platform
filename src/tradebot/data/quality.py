@@ -41,6 +41,9 @@ class QualityReport:
     gaps: list[date] = field(default_factory=list)
     duplicates_dropped: int = 0
     outliers: list[tuple[date, float]] = field(default_factory=list)
+    # Equity "filler" bars (volume 0 and open = high = low = close): a provider's carry-forward
+    # print after a delisting, not a trade (ADR-0001 A33 M2). Counted, not dropped, here.
+    filler_bars: list[date] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     # "ok", or "revision_quarantined" / "corrupt" / "quality_error" / "error" when the
     # facade could not refresh or read this symbol (see MarketData.refresh / verify).
@@ -186,7 +189,21 @@ def validate_bars(
         # Zero volume on an equity session day: warning only.
         if not is_crypto:
             on_session = present.isin(expected)
+            flat = (
+                (work["open"] == work["high"])
+                & (work["high"] == work["low"])
+                & (work["low"] == work["close"])
+            ).to_numpy()
             zero_vol = (work["volume"] == 0).to_numpy() & on_session
+            filler = zero_vol & flat
+            if filler.any():
+                report.filler_bars = [ts.date() for ts in work.index[filler]]
+                _warn(
+                    report,
+                    f"{len(report.filler_bars)} filler bar(s) (zero volume, open=high=low=close): "
+                    f"{_fmt_dates(report.filler_bars)}",
+                )
+            zero_vol = zero_vol & ~filler
             if zero_vol.any():
                 zero_dates = [ts.date() for ts in work.index[zero_vol]]
                 _warn(

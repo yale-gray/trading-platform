@@ -91,6 +91,7 @@ class OrderReason(StrEnum):
     SHRUNK_CASH = "SHRUNK_CASH"
     INSUFFICIENT_CASH = "INSUFFICIENT_CASH"
     FLATTEN_NO_BAR = "FLATTEN_NO_BAR"  # flatten sell of a symbol that had no bar (extra haircut)
+    DELIST_NO_BAR = "DELIST_NO_BAR"  # daily force-sell of a held symbol whose bars ended (A33 B1)
     FLATTEN_LATE = "FLATTEN_LATE"  # flatten at a later session's open (the last bar never came)
 
 

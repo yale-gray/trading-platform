@@ -1,0 +1,29 @@
+# Renames and ticker changes: the ticker the point-in-time source lists -> the ticker that carries the price history.
+# The membership loader canonicalises through this table so one company is one symbol across a rename.
+# `until` (optional, exclusive) limits an alias to membership before that date (ticker reuse: IR was Trane until 2020-03-02).
+# Only aliases whose target ticker has a continuous price history for the same company are listed (checked against the cache).
+member_ticker,price_ticker,until,note
+FB,META,,Facebook -> Meta Platforms 2022-06
+ANTM,ELV,,Anthem -> Elevance Health 2022-06
+ABC,COR,,AmerisourceBergen -> Cencora 2023-08
+BBT,TFC,,BB&T -> Truist 2019-12
+CTL,LUMN,,CenturyLink -> Lumen 2020-09
+UTX,RTX,,United Technologies -> Raytheon Technologies 2020-04
+KORS,CPRI,,Michael Kors -> Capri Holdings 2019-01
+WLTW,WTW,,Willis Towers Watson 2022-01 ticker change
+SYMC,GEN,,Symantec -> NortonLifeLock -> Gen Digital
+NLOK,GEN,,NortonLifeLock -> Gen Digital 2022-11
+FLT,CPAY,,Fleetcor -> Corpay 2024-03
+PKI,RVTY,,PerkinElmer -> Revvity 2023-05
+JEC,J,,Jacobs Engineering -> Jacobs Solutions
+HRS,LHX,,Harris -> L3Harris 2019-06
+TMK,GL,,Torchmark -> Globe Life 2019-08
+BLL,BALL,,Ball Corp ticker BLL -> BALL 2022-05
+RE,EG,,Everest Re -> Everest Group 2023-07
+MMC,MRSH,,Marsh & McLennan ticker change
+BK,BNY,,Bank of New York Mellon ticker change
+IR,TT,2020-03-02,Ingersoll-Rand plc -> Trane Technologies 2020-03; the later IR is Gardner Denver
+BHGE,BKR,,Baker Hughes a GE company -> Baker Hughes 2019-10
+FI,FISV,,Fiserv ticker FISV -> FI 2023-06 -> FISV 2025
+LB,BBWI,,L Brands -> Bath & Body Works 2021-08
+WYND,TNL,,Wyndham Worldwide -> Wyndham Destinations -> Travel + Leisure (Alpaca TNL series runs from 2016-01)

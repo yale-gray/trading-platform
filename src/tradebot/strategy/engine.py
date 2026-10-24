@@ -23,6 +23,7 @@ import pandas as pd
 from tradebot.data.calendar import sessions as xnys_sessions
 from tradebot.data.events import fomc_dates
 from tradebot.data.symbols import normalize_symbol
+from tradebot.data.universe import sp500_member_flags
 from tradebot.strategy.indicators import INDICATORS
 from tradebot.strategy.schema import (
     AllOf,
@@ -47,6 +48,7 @@ from tradebot.strategy.schema import (
     SessionOperand,
     StopRequest,
     StrategySpec,
+    UniverseOperand,
 )
 from tradebot.strategy.signals import HeldPosition, Intent, SignalSet
 
@@ -96,6 +98,8 @@ def _op_key(op: Any, ctx: str) -> tuple | None:
         return (ctx, "calendar", op.calendar)
     if isinstance(op, EventOperand):
         return (ctx, "event", op.event, op.field)
+    if isinstance(op, UniverseOperand):
+        return (ctx, "universe", op.universe)
     return None
 
 
@@ -106,7 +110,10 @@ def _compile_operand(op: Any) -> _Reader:
             return float(bh) if bh is not None else math.nan
 
         return read_pos
-    if isinstance(op, (PriceOperand, IndOperand, SessionOperand, CalendarOperand, EventOperand)):
+    if isinstance(
+        op,
+        (PriceOperand, IndOperand, SessionOperand, CalendarOperand, EventOperand, UniverseOperand),
+    ):
         keys: dict[str, tuple] = {}  # context symbol -> feature key (built once, not per read)
 
         def read_feat(f: Features, ctx: str, i: int, bh: int | None) -> float:
@@ -192,7 +199,10 @@ def _compile_condition(c: Condition) -> _Cond:
 
 def _collect_operands(obj: Any) -> list[Any]:
     """All price/indicator operands inside a condition or operand (depth-first)."""
-    if isinstance(obj, (PriceOperand, IndOperand, SessionOperand, CalendarOperand, EventOperand)):
+    if isinstance(
+        obj,
+        (PriceOperand, IndOperand, SessionOperand, CalendarOperand, EventOperand, UniverseOperand),
+    ):
         return [obj]
     out: list[Any] = []
     if isinstance(obj, AllOf):
@@ -336,6 +346,8 @@ class CompiledStrategy:
                 series = self._session(df, op)
             elif key[1] in ("calendar", "event"):
                 series = self._clock(df, op, intraday=self.spec.timeframe == "15m")
+            elif key[1] == "universe":
+                series = self._member(sym, df, intraday=self.spec.timeframe == "15m")
             else:
                 series = self._indicator(raw, sym, df, op)
             arrays[key] = series.reindex(cal).to_numpy(dtype="float64")
@@ -420,6 +432,21 @@ class CompiledStrategy:
             f_pos = sess.searchsorted(fomc[np.minimum(nxt_i, len(fomc) - 1)], side="left")
             vals = np.where(ok, (f_pos - d_pos).astype("float64"), np.nan)
         return pd.Series(vals, index=idx, dtype="float64")
+
+    @staticmethod
+    def _member(sym: str, df: pd.DataFrame, intraday: bool) -> pd.Series:
+        """``{universe: sp500_member}`` per bar: point-in-time membership (A32), 1.0 or 0.0.
+
+        Uses the list in force at the previous session's close, so it needs no bar data of the
+        current or any later bar (causal by construction).
+        """
+        idx = df.index
+        if len(idx) == 0:
+            return pd.Series([], index=idx, dtype="float64")
+        days = idx.tz_convert(_NY).normalize() if intraday else idx
+        uniq = sorted({ts.date() for ts in days})
+        flag = dict(zip(uniq, sp500_member_flags(sym, uniq), strict=True))
+        return pd.Series([flag[ts.date()] for ts in days], index=idx, dtype="float64")
 
     @staticmethod
     def _indicator(raw: dict, sym: str, df: pd.DataFrame, op: IndOperand) -> pd.Series:

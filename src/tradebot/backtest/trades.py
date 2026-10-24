@@ -29,7 +29,9 @@ __all__ = [
     "open_positions",
 ]
 
-ExitReason = Literal["signal", "stop", "rebalance", "manual", "flatten", "flatten_no_bar"]
+ExitReason = Literal[
+    "signal", "stop", "rebalance", "manual", "flatten", "flatten_no_bar", "delist_no_bar"
+]
 
 _EXIT_REASONS: dict[OrderOrigin, ExitReason] = {
     OrderOrigin.STRATEGY: "signal",
@@ -76,6 +78,8 @@ def exit_reason_for(origin: OrderOrigin, reason: OrderReason | None = None) -> E
     """
     if origin is OrderOrigin.FLATTEN and reason is OrderReason.FLATTEN_NO_BAR:
         return "flatten_no_bar"
+    if origin is OrderOrigin.FLATTEN and reason is OrderReason.DELIST_NO_BAR:
+        return "delist_no_bar"
     return _EXIT_REASONS[origin]
 
 

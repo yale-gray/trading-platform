@@ -150,6 +150,22 @@ class EventOperand(BaseModel):
     field: Literal["tdays_until"]
 
 
+_MEMBER = "sp500_member"
+
+
+class UniverseOperand(BaseModel):
+    """``{universe: sp500_member}``: 1.0 if the context symbol is an S&P 500 member on the bar,
+    else 0.0 (ADR-0001 A32).
+
+    Membership is the point-in-time list in force at the previous session's close, so it is known
+    before the bar and causal. It is data, not clock: ``clock_only()`` is False. Equities only;
+    daily and 15m. Gates entries only: a held name that leaves the index keeps its normal exit.
+    """
+
+    model_config = _STRICT
+    universe: Literal["sp500_member"]  # == _MEMBER
+
+
 class IndOperand(BaseModel):
     """``{ind: <name>, period: n, of: close, ...}``; name must be a key of ``INDICATORS``."""
 
@@ -199,7 +215,7 @@ class IndOperand(BaseModel):
 
 Operand = (
     float | Param | PriceOperand | PosOperand | IndOperand | SessionOperand | CalendarOperand
-    | EventOperand
+    | EventOperand | UniverseOperand
 )  # fmt: skip
 
 
@@ -591,6 +607,9 @@ class _StrategyBase(BaseModel):
         if any(isinstance(d, dict) and ("calendar" in d or "event" in d) for d in _walk(body)):
             if self.asset_class != "equity":
                 raise ValueError("'calendar' and 'event' operands are for equities only (XNYS)")
+        if any(isinstance(d, dict) and d.get("universe") == _MEMBER for d in _walk(body)):
+            if self.asset_class != "equity":
+                raise ValueError("'universe' operands are for equities only (S&P 500 membership)")
         if self.timeframe != "15m" and any(
             isinstance(d, dict) and d.get("ind") in _NOISE for d in _walk(body)
         ):
@@ -650,8 +669,8 @@ class _StrategyBase(BaseModel):
         for d in _walk(self._body_dump()):
             if not isinstance(d, dict):
                 continue
-            if "price" in d or "ind" in d or "pos" in d:
-                return False
+            if "price" in d or "ind" in d or "pos" in d or d.get("universe") == _MEMBER:
+                return False  # membership is data, not clock (A32)
             if "session" in d:
                 if d["session"] != _CLOCK_SESSION:
                     return False

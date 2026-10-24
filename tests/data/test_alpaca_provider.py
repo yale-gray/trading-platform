@@ -192,11 +192,13 @@ def test_non_trading_unsupported_inputs() -> None:
     with pytest.raises(ValueError):
         AlpacaProvider(feed="otc")
     with pytest.raises(ValueError):
-        AlpacaProvider(timeframe="1d")
+        AlpacaProvider(timeframe="1h")  # 1d is a supported daily source (A32)
     with pytest.raises(ProviderError):
         make(FakeClient([])).fetch_many([Symbol("BTC/USD")], DAY, DAY)
     with pytest.raises(ProviderError):
-        make(FakeClient([])).fetch_many([Symbol("AAPL")], DAY, DAY, Timeframe.D1)
+        make(FakeClient([])).fetch_many([Symbol("BTC/USD")], DAY, DAY, Timeframe.D1)
+    with pytest.raises(ProviderError):
+        make(FakeClient([])).fetch_many([Symbol("AAPL")], DAY, DAY, "1h")  # type: ignore[arg-type]
 
 
 def test_sip_request_end_is_clamped_to_now_minus_delay() -> None:

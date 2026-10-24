@@ -173,6 +173,8 @@ def _config_payload(cfg: BacktestConfig) -> dict[str, Any]:
         flags["settlement"] = eng.settlement
     if eng.cost_profile != "flat":
         flags["cost_profile"] = eng.cost_profile
+    if eng.force_sell_missing:
+        flags["force_sell_missing"] = True
     if cfg.decision_lag_bars is not None:
         flags["decision_lag_bars"] = cfg.decision_lag_bars
     return {

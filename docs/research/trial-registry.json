@@ -118,5 +118,17 @@
     "batch": "tierA-2026-10",
     "protocol": true,
     "notes": " Measured after fixes deff99f (A31)."
+  },
+  {
+    "id": "tA_st_reversal_pit",
+    "commit": "a172de0",
+    "date": "2026-10-23",
+    "status": "failed",
+    "sharpe_period": 0.04650449665209557,
+    "sharpe_annual": 0.7382359979260844,
+    "n_obs": 1972,
+    "batch": "pit-reversal-2026-10",
+    "protocol": true,
+    "notes": ""
   }
 ]
